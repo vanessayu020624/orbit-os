@@ -81,7 +81,8 @@ export function AppShell({ children, sidekick }: { children: ReactNode; sidekick
           className="fixed bottom-6 right-6 flex items-center gap-2 px-4 py-2.5 rounded-full
                      bg-brand text-white text-sm shadow-lg hover:opacity-90">
           <span>AI Sidekick</span>
-          {busy && <span className="w-2 h-2 rounded-full bg-brand animate-pulse ring-2 ring-white" />}
+          {/* 按钮底色就是 bg-brand，圆点必须用白色才看得见 */}
+          {busy && <span className="w-2 h-2 rounded-full bg-white animate-pulse" />}
         </button>
       )}
     </div>

@@ -61,4 +61,13 @@ describe('writeUiPrefs', () => {
     writeUiPrefs({ open: false, wide: true }, store)
     expect(readUiPrefs(store)).toEqual({ open: false, wide: true })
   })
+
+  it('回落到默认值时返回的是副本，改动它不会污染 DEFAULT_UI_PREFS', () => {
+    // toEqual 是结构比较，返回共享引用照样通过——必须用 not.toBe 才抓得到。
+    const got = readUiPrefs(fakeStore())
+    expect(got).not.toBe(DEFAULT_UI_PREFS)
+    got.open = false
+    expect(DEFAULT_UI_PREFS.open).toBe(true)
+    expect(readUiPrefs(fakeStore())).toEqual({ open: true, wide: false })
+  })
 })

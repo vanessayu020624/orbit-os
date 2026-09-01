@@ -86,9 +86,10 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
   // 切换角色时必须清空——把 A 角色看到的数据带进 B 角色的上下文是越权泄漏。
   const history = useRef<{ q: string; a: string }[]>([])
 
-  const initPrefs = readUiPrefs()
-  const [open, setOpen] = useState(initPrefs.open)
-  const [wide, setWide] = useState(initPrefs.wide)
+  // 必须惰性初始化：Provider 包着整棵应用树，一次问询会 emit 几十个事件、每个都触发重渲染，
+  // 非惰性写法会在每次渲染上做一次同步 localStorage.getItem + JSON.parse 再把结果丢掉。
+  const [open, setOpen] = useState(() => readUiPrefs().open)
+  const [wide, setWide] = useState(() => readUiPrefs().wide)
 
   useEffect(() => { writeUiPrefs({ open, wide }) }, [open, wide])
 

@@ -18,22 +18,22 @@ function getStorage(store?: Pick<Storage, 'getItem'>): Pick<Storage, 'getItem'> 
 /** 存储不可用（隐私模式、被禁用）或内容损坏时一律回落到默认值，绝不抛异常。 */
 export function readUiPrefs(store?: Pick<Storage, 'getItem'>): UiPrefs {
   const s = getStorage(store)
-  if (!s) return DEFAULT_UI_PREFS
+  if (!s) return { ...DEFAULT_UI_PREFS }
   let raw: string | null
   try {
     raw = s.getItem(KEY)
   } catch {
-    return DEFAULT_UI_PREFS
+    return { ...DEFAULT_UI_PREFS }
   }
-  if (raw == null) return DEFAULT_UI_PREFS
+  if (raw == null) return { ...DEFAULT_UI_PREFS }
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
   } catch {
-    return DEFAULT_UI_PREFS
+    return { ...DEFAULT_UI_PREFS }
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    return DEFAULT_UI_PREFS
+    return { ...DEFAULT_UI_PREFS }
   }
   const p = parsed as Record<string, unknown>
   return {
