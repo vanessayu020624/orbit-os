@@ -268,4 +268,12 @@ function applyPlantedScenario(db: DbSnapshot) {
     dueDate: '2026-06-20', amount: 486000 }
   db.receivables[1] = { ...db.receivables[1], status: '已逾期', paidAmount: 0,
     dueDate: '2026-06-05', amount: 312000 }
+
+  // 归属对齐：上面几段把部分客户改判给了别的销售，但订单/商机在生成时
+  // 已经把客户当时的 ownerId 拷了一份，必须在这里重新对齐，否则会出现
+  // 「销售看得到某张订单，却看不到这张订单的客户」这种自相矛盾的状态。
+  // 必须放在全部客户归属改判之后，不能提前。
+  const ownerOf = new Map(db.customers.map(c => [c.id, c.ownerId]))
+  db.orders.forEach(o => { o.ownerId = ownerOf.get(o.customerId) ?? o.ownerId })
+  db.opportunities.forEach(o => { o.ownerId = ownerOf.get(o.customerId) ?? o.ownerId })
 }

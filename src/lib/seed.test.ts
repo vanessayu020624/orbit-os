@@ -60,6 +60,26 @@ describe('埋雷数据（演示命门，必须精确）', () => {
   })
 })
 
+describe('归属一致性', () => {
+  const db = generateSeed(42)
+
+  it('归属一致性：每张订单/商机的归属人与其客户的归属人一致', () => {
+    const ownerOf = new Map(db.customers.map(c => [c.id, c.ownerId]))
+    const badOrders = db.orders.filter(o => o.ownerId !== ownerOf.get(o.customerId))
+    const badOpps = db.opportunities.filter(o => o.ownerId !== ownerOf.get(o.customerId))
+    expect(badOrders.map(o => o.orderNo)).toEqual([])
+    expect(badOpps.length).toBe(0)
+  })
+
+  it('权限场景：张伟能看到的订单，其客户必定也在他的客户列表里', () => {
+    const zw = db.users.find(u => u.name === '张伟')!
+    const mineCustomerIds = new Set(db.customers.filter(c => c.ownerId === zw.id).map(c => c.id))
+    const myOrders = db.orders.filter(o => o.ownerId === zw.id)
+    expect(myOrders.length).toBeGreaterThan(0)
+    expect(myOrders.every(o => mineCustomerIds.has(o.customerId))).toBe(true)
+  })
+})
+
 describe('数据规模', () => {
   const db = generateSeed(42)
   it('实体数量符合设计', () => {
