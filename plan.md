@@ -6,7 +6,9 @@
 
 **Architecture:** 纯客户端单页应用，全部业务数据由种子函数在运行时生成并存于 Zustand。Agent 采用 Planner–Executor 双层架构：先让 LLM 输出结构化 JSON 计划并渲染成可见清单，再跑 function calling 循环逐步执行；写操作强制人工确认后才落库。权限在工具注册表层生效——未授权的工具不会出现在发给 LLM 的 tools 数组里。LLM 请求经 Cloudflare Pages Function 同源代理，API Key 不入前端。
 
-**Tech Stack:** Vite 5 · React 18 · TypeScript 5 · Tailwind CSS 3 · shadcn/ui · Zustand 4 · Recharts 2 · Vitest 1 · Cloudflare Pages + Pages Functions · 智谱 GLM-4.5-Flash
+**Tech Stack:**（以 P0 实际安装为准）Vite 8 · React 19 · TypeScript 6 · Tailwind CSS 3.4 · Zustand 5 · Recharts 3 · React Router 7 · Vitest 4 · Cloudflare Pages + Pages Functions · 智谱 GLM-4.5-Flash
+
+组件全部手写 Tailwind，**不引入 shadcn/ui**——本项目只需要 5 个简单组件，装一套 CLI 生成体系是净负担。
 
 **Spec:** `docs/superpowers/specs/2026-09-02-orbitos-design.md`
 
@@ -14,7 +16,8 @@
 
 ## Global Constraints
 
-- **Node ≥ 20**（本机 v22.22.0）。包管理用 npm。
+- **Node ≥ 20**（本机 v22.22.0）。包管理用 npm。构建命令 `npm run build`（= `tsc -b && vite build`），产物目录 `dist`。
+- **TypeScript 严格模式 + `noUnusedLocals` 已开启**：解构出来不用的变量会直接构建失败。
 - **今天是 2026-09-02**。所有演示数据的日期以此为基准，不要写死其他"今天"。
 - **每个源文件 < 200 行**。超了就拆。15 个工具必须拆成 `crm/erp/analytics/write` 四个文件。
 - **种子数据是函数不是 JSON 文件**。绝不生成 `data.json` 之类的大体积数据文件——读一次就是 100k tokens。
@@ -85,7 +88,6 @@ orbit-os/
     │   ├── loop.ts         # runAgent()：Planner → Executor → Reflect
     │   └── replay.ts       # 录播模式事件流（断网兜底）
     ├── components/
-    │   ├── ui/             # shadcn 生成
     │   ├── AppShell.tsx  RoleSwitcher.tsx  StatusChip.tsx  DataTable.tsx  RefChip.tsx
     ├── sidekick/
     │   ├── Sidekick.tsx  PlanChecklist.tsx  ToolCallCard.tsx  ConfirmCard.tsx  FinalAnswer.tsx
