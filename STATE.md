@@ -30,3 +30,13 @@
 - public/_redirects 已加 SPA 回退，否则 Pages 上刷新子路由 404
 - Ruling T2-A：P0 自检页原样迁到 src/pages/SelfTest.tsx，路由 /selftest 挂在 AppShell 之外（未入导航）
 - ⚠️ 坑：react-router-dom 7.18 仍导出 BrowserRouter/Routes/Route/NavLink，brief 的 R6 风格写法无需改动即可用
+
+## P3 完成 (2026-09-02)
+- ALL_TOOLS 15 个（写 4 个）；toolsFor(role) / toolSchemasFor(role) / toolCatalogText(role)
+- executeTool(name, args, ctx) → {ok, result, ms}；权限双层拦截，registry.test.ts 14 条断言已覆盖
+- runAgent(opts) 见 RunAgentOptions；UI 只需实现 emit 与 requestConfirm 两个回调
+- requestConfirm 返回 Promise<boolean>，未批准时会把 rejected 结果喂回模型
+- 工具返回结构契约以 registry.test.ts 的断言为准（count/customers/topCustomers/risks/suppliers）
+- simulate_delivery_risk 默认 withinDays=14（非 7），供应链主管测算出 SKU-203 缺口 48 台已钉住
+- ⚠️ 坑：本地 npm run dev 不跑 Pages Function，/api/chat 404。需 npx wrangler pages dev，本次沙箱无网络未实测 GLM 实际输出行为，留给 P4 验证
+- 15 个工具全 15 通过 npm test（33/33 全绿，含 P1 的 19 条）；npm run build 通过
