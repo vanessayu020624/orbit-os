@@ -29,12 +29,17 @@ describe('权限第一层：工具可见性', () => {
   it('销售代表拿不到 aggregate_metrics', () => {
     expect(toolsFor('sales_rep').map(t => t.name)).not.toContain('aggregate_metrics')
   })
-  it('CEO 拿不到任何写工具', () => {
-    expect(toolsFor('ceo').some(t => t.isWrite)).toBe(false)
+  it('CEO 现在拥有全部 4 个写工具（越权代办，非零写权限）', () => {
+    // V2 修订：推翻 V1「CEO 零写权限」——CEO 保留写权限，越权时显式提示并留痕，见 overrideNoticeFor。
+    const writeNames = toolsFor('ceo').filter(t => t.isWrite).map(t => t.name)
+    expect(writeNames.sort()).toEqual([
+      'create_followup_task', 'create_purchase_order', 'reserve_inventory', 'update_order_promise_date',
+    ].sort())
   })
-  it('供应链主管拿不到客户与商机工具', () => {
+  it('供应链主管现在能查客户（但拿不到商机工具）', () => {
     const names = toolsFor('supply_chain').map(t => t.name)
-    expect(names).not.toContain('query_customers')
+    expect(names).toContain('query_customers')
+    expect(names).toContain('get_customer_detail')
     expect(names).not.toContain('query_opportunities')
   })
 })
@@ -94,6 +99,28 @@ describe('simulate_delivery_risk 传入 orderNos 也要过 scope（不能绕过�
     expect(r.count).toBe(1)
     expect(r.risks[0].orderNo).toBe(own.orderNo)
     expect(r.deniedCount).toBe(1)
+  })
+})
+
+describe('供应链主管客户可见性：财务字段裁剪', () => {
+  it('供应链主管调用 query_customers，返回对象不含财务三字段', () => {
+    const r: any = executeTool('query_customers', {}, ctxFor('王强')).result
+    expect(r.count).toBe(48)
+    for (const c of r.customers) {
+      expect(c).not.toHaveProperty('annualRevenue')
+      expect(c).not.toHaveProperty('creditLimit')
+      expect(c).not.toHaveProperty('creditUsed')
+    }
+  })
+  it('CEO 调用 query_customers，财务三字段都在', () => {
+    const r: any = executeTool('query_customers', {}, ctxFor('陈立')).result
+    expect(r.customers[0]).toHaveProperty('annualRevenue')
+    expect(r.customers[0]).toHaveProperty('creditLimit')
+    expect(r.customers[0]).toHaveProperty('creditUsed')
+  })
+  it('sortByRevenue 对供应链主管静默失效，不报错', () => {
+    const r: any = executeTool('query_customers', { sortByRevenue: true }, ctxFor('王强')).result
+    expect(r.count).toBe(48)
   })
 })
 

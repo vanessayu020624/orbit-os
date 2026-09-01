@@ -84,13 +84,16 @@ describe('写入步骤补推（Bug 1b）', () => {
     expect(seen.at(-1)!.filter(m => m.content?.includes('尚未执行的写入步骤')).length).toBe(1)
   })
 
-  it('CEO 没有任何写工具，同样的计划不补推，chat 只 2 次', async () => {
-    script(WRITE_PLAN, textReply('这是结论。'))
+  it('V2：CEO 现在也持有写工具（越权代办），同样的计划一样会被补推一次，chat 3 次', async () => {
+    // 推翻 V1「CEO 零写权限」：CEO 的 writeToolNames 不再是空集，补推逻辑对 CEO 同样生效。
+    script(WRITE_PLAN, textReply('建议向锐驰机电采购 48 台。'), textReply('确实不需要执行，理由如下。'))
     const events: AgentEvent[] = []
     await run(userNamed('陈立'), events)
 
-    expect(chatMock).toHaveBeenCalledTimes(2)
-    expect(seen.some(hasNudge)).toBe(false)
+    expect(chatMock).toHaveBeenCalledTimes(3)
+    const last = seen[2].at(-1)!
+    expect(last.role).toBe('user')
+    expect(last.content).toContain('尚未执行的写入步骤')
     expect(events.some(e => e.type === 'final')).toBe(true)
   })
 

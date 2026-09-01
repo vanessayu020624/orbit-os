@@ -5,7 +5,7 @@ export const writeTools: ToolDef[] = [
   {
     name: 'update_order_promise_date',
     description: '修改订单的承诺交期。这是写操作，会先请用户确认。',
-    allowedRoles: ['sales_rep', 'sales_director'],
+    allowedRoles: ['sales_rep', 'sales_director', 'ceo'],
     isWrite: true,
     parameters: {
       type: 'object',
@@ -31,7 +31,7 @@ export const writeTools: ToolDef[] = [
   {
     name: 'reserve_inventory',
     description: '为指定订单锁定库存。这是写操作，会先请用户确认。',
-    allowedRoles: ['supply_chain'],
+    allowedRoles: ['supply_chain', 'ceo'],
     isWrite: true,
     parameters: {
       type: 'object',

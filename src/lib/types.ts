@@ -51,6 +51,8 @@ export interface Task {
 export interface AuditEntry {
   id: string; at: string; role: Role; userId: string
   tool: string; args: unknown; ok: boolean; ms: number; summary: string
+  /** 越权代办标记：例如 CEO 执行了通常由其他角色负责的写操作。 */
+  override?: boolean
 }
 
 export interface DbSnapshot {

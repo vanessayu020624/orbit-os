@@ -46,11 +46,14 @@ export function executeTool(name: string, args: any, ctx: ToolContext): ExecResu
   }
 }
 
-export function auditOf(name: string, args: unknown, r: ExecResult, ctx: ToolContext): AuditEntry {
+export function auditOf(
+  name: string, args: unknown, r: ExecResult, ctx: ToolContext, override = false,
+): AuditEntry {
   return {
     id: `AU-${Date.now()}-${Math.round(Math.random() * 1e4)}`,
     at: new Date().toISOString(), role: ctx.role, userId: ctx.user.id,
     tool: name, args, ok: r.ok, ms: r.ms,
     summary: r.ok ? JSON.stringify(r.result).slice(0, 160) : String((r.result as any)?.error),
+    ...(override ? { override: true } : {}),
   }
 }

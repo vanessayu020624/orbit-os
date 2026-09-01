@@ -2,6 +2,7 @@ import type { AgentEvent, Plan, ToolContext, User, Mutation, PlanStep } from '..
 import { chat, extractJson, LlmUnavailable, type ChatMessage } from './llm'
 import { plannerPrompt, executorPrompt, type Turn } from './prompts'
 import { toolSchemasFor, executeTool, auditOf, ALL_TOOLS, toolsFor } from './registry'
+import { overrideNoticeFor } from '../lib/rbac'
 import type { DbSnapshot, AuditEntry } from '../lib/types'
 
 export interface RunAgentOptions {
@@ -120,8 +121,10 @@ export async function runAgent(o: RunAgentOptions): Promise<void> {
       const def = ALL_TOOLS.find(t => t.name === name)
 
       // ---------- Phase 3: HITL ----------
+      const overrideNotice = def?.isWrite ? overrideNoticeFor(name, o.user.role) : null
       if (def?.isWrite) {
-        const summary = def.confirmSummary?.(args, ctx()) ?? `将执行写操作 ${name}`
+        const baseSummary = def.confirmSummary?.(args, ctx()) ?? `将执行写操作 ${name}`
+        const summary = overrideNotice ? `${overrideNotice}\n${baseSummary}` : baseSummary
         o.emit({ type: 'confirm_request', id: call.id, toolName: name, args, summary })
         const approved = await o.requestConfirm(call.id, name, args, summary)
         o.emit({ type: 'confirm_resolved', id: call.id, approved })
@@ -136,7 +139,7 @@ export async function runAgent(o: RunAgentOptions): Promise<void> {
       }
 
       const r = executeTool(name, args, ctx())
-      o.pushAudit(auditOf(name, args, r, ctx()))
+      o.pushAudit(auditOf(name, args, r, ctx(), !!overrideNotice))
       o.emit({ type: 'tool_result', id: call.id, result: r.result, ms: r.ms })
       messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(r.result) })
     }

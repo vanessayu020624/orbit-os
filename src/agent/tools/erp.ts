@@ -137,7 +137,7 @@ export const erpTools: ToolDef[] = [
   {
     name: 'create_purchase_order',
     description: '创建一张采购单。这是写操作，会先请用户确认。',
-    allowedRoles: ['supply_chain'],
+    allowedRoles: ['supply_chain', 'ceo'],
     isWrite: true,
     parameters: {
       type: 'object',

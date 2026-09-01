@@ -8,9 +8,9 @@ export const ROLE_META: Record<Role, RoleMeta> = {
   sales_director:  { key: 'sales_director',  label: '销售总监',   demoUserId: 'U-004',
                      description: '可见本团队全部数据与全公司汇总指标' },
   supply_chain:    { key: 'supply_chain',    label: '供应链主管', demoUserId: 'U-006',
-                     description: '可见全部库存/采购/供应商；订单金额脱敏；无客户与商机权限' },
+                     description: '可见全部库存/采购/供应商与全部客户（不含客户财务字段）；订单金额脱敏；无商机权限' },
   ceo:             { key: 'ceo',             label: 'CEO',        demoUserId: 'U-008',
-                     description: '全公司数据只读，无任何写权限' },
+                     description: '全公司数据可见，可执行任何写操作，但越权代办会被显式提示并留痕' },
 }
 
 function teamMemberIds(db: DbSnapshot, user: User): string[] {
@@ -23,8 +23,13 @@ export function scopeCustomers(db: DbSnapshot, user: User): Customer[] {
     case 'sales_director': { const ids = teamMemberIds(db, user)
                              return db.customers.filter(c => ids.includes(c.ownerId)) }
     case 'ceo':            return db.customers
-    case 'supply_chain':   return []          // 无客户权限
+    case 'supply_chain':   return db.customers // 需要知道货发给谁，做分配优先级；财务字段另行裁剪
   }
+}
+
+/** 供应链需要知道货发给谁（做分配优先级），但不需要知道客户的钱。 */
+export function canSeeCustomerFinancials(role: Role): boolean {
+  return role !== 'supply_chain'
 }
 
 export function scopeOrders(db: DbSnapshot, user: User): SalesOrder[] {
@@ -68,4 +73,18 @@ export function maskOrderForRole(o: SalesOrder, role: Role): Record<string, unkn
     totalAmount: MASK,
     items: o.items.map(l => ({ skuId: l.skuId, qty: l.qty, unitPrice: MASK })),
   }
+}
+
+/** 写操作通常由谁执行。CEO 有权执行任何写操作，但那属于越权代办，必须显式提示并留痕。 */
+const WRITE_TOOL_OWNER: Record<string, Role> = {
+  create_purchase_order:     'supply_chain',
+  reserve_inventory:         'supply_chain',
+  create_followup_task:      'sales_rep',
+  update_order_promise_date: 'sales_rep',
+}
+
+export function overrideNoticeFor(toolName: string, role: Role): string | null {
+  const owner = WRITE_TOOL_OWNER[toolName]
+  if (!owner || owner === role || role !== 'ceo') return null
+  return `越权代办：该操作通常由「${ROLE_META[owner].label}」执行。你以 CEO 身份直接执行，操作会完整留痕。`
 }

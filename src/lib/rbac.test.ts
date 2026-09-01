@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { generateSeed } from './seed'
-import { scopeCustomers, scopeOrders, scopeOpportunities, scopeReceivables, maskOrderForRole } from './rbac'
+import {
+  scopeCustomers, scopeOrders, scopeOpportunities, scopeReceivables, maskOrderForRole,
+  canSeeCustomerFinancials, overrideNoticeFor,
+} from './rbac'
 
 const db = generateSeed(42)
 const u = (n: string) => db.users.find(x => x.name === n)!
@@ -18,8 +21,9 @@ describe('数据级权限', () => {
   it('CEO 看到全部 48 个客户', () => {
     expect(scopeCustomers(db, u('陈立')).length).toBe(48)
   })
-  it('供应链主管无客户与商机权限', () => {
-    expect(scopeCustomers(db, u('王强')).length).toBe(0)
+  it('供应链主管可见全部 48 个客户（需要知道货发给谁），但无商机权限', () => {
+    // V2 修订：推翻 V1「供应链看不到客户」——他要发 160 张订单的货，得知道发给谁才能排优先级。
+    expect(scopeCustomers(db, u('王强')).length).toBe(48)
     expect(scopeOpportunities(db, u('王强')).length).toBe(0)
   })
   it('销售总监看到本团队而非全公司', () => {
@@ -56,5 +60,28 @@ describe('字段脱敏', () => {
   it('其他角色不脱敏', () => {
     const o = db.orders.find(x => x.orderNo === 'SO-2026-0412')!
     expect((maskOrderForRole(o, 'ceo') as any).totalAmount).toBe(o.totalAmount)
+  })
+})
+
+describe('客户财务字段可见性', () => {
+  it('仅供应链主管不可见客户财务字段', () => {
+    expect(canSeeCustomerFinancials('supply_chain')).toBe(false)
+    expect(canSeeCustomerFinancials('sales_rep')).toBe(true)
+    expect(canSeeCustomerFinancials('sales_director')).toBe(true)
+    expect(canSeeCustomerFinancials('ceo')).toBe(true)
+  })
+})
+
+describe('CEO 越权代办提示', () => {
+  it('CEO 执行通常由供应链负责的写操作会收到含「供应链主管」的提示', () => {
+    const notice = overrideNoticeFor('create_purchase_order', 'ceo')
+    expect(notice).toBeTruthy()
+    expect(notice).toContain('供应链主管')
+  })
+  it('供应链主管执行自己的写工具没有越权提示', () => {
+    expect(overrideNoticeFor('create_purchase_order', 'supply_chain')).toBeNull()
+  })
+  it('销售代表执行自己的写工具没有越权提示', () => {
+    expect(overrideNoticeFor('create_followup_task', 'sales_rep')).toBeNull()
   })
 })

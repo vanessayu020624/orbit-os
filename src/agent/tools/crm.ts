@@ -1,32 +1,47 @@
-import type { ToolDef } from '../../lib/types'
-import { scopeCustomers, scopeOpportunities } from '../../lib/rbac'
+import type { Role, ToolDef } from '../../lib/types'
+import { canSeeCustomerFinancials, scopeCustomers, scopeOpportunities } from '../../lib/rbac'
+
+/** 供应链主管不需要知道客户的钱：从返回对象里删掉这三个 key（不置 0，置 0 会被模型当成真实数值）。 */
+function stripFinancials<T extends object>(c: T, role: Role): T {
+  if (canSeeCustomerFinancials(role)) return c
+  const rest: any = { ...c }
+  delete rest.annualRevenue
+  delete rest.creditLimit
+  delete rest.creditUsed
+  return rest as T
+}
 
 export const crmTools: ToolDef[] = [
   {
     name: 'query_customers',
-    description: '查询客户列表。返回客户名、行业、区域、等级、年采购额、信用额度。只返回当前用户有权查看的客户。',
-    allowedRoles: ['sales_rep', 'sales_director', 'ceo'],
+    description: '查询客户列表。返回客户名、行业、区域、等级；销售角色与 CEO 另可见年采购额、信用额度，' +
+      '供应链主管按角色裁剪，不返回这些财务字段。sortByRevenue 对供应链主管无意义会被静默忽略。',
+    allowedRoles: ['sales_rep', 'sales_director', 'supply_chain', 'ceo'],
     isWrite: false,
     parameters: {
       type: 'object',
       properties: {
         tier: { type: 'string', enum: ['A', 'B', 'C'], description: '按客户等级筛选' },
-        sortByRevenue: { type: 'boolean', description: '是否按年采购额降序排列' },
+        sortByRevenue: { type: 'boolean', description: '是否按年采购额降序排列（供应链主管看不到该字段，此参数对其无效）' },
         limit: { type: 'number', description: '返回条数上限，默认 20' },
       },
     },
     run: (a, ctx) => {
       let rows = scopeCustomers(ctx.db, ctx.user)
       if (a.tier) rows = rows.filter(c => c.tier === a.tier)
-      if (a.sortByRevenue) rows = [...rows].sort((x, y) => y.annualRevenue - x.annualRevenue)
+      if (a.sortByRevenue && canSeeCustomerFinancials(ctx.role)) {
+        rows = [...rows].sort((x, y) => y.annualRevenue - x.annualRevenue)
+      }
       if (!rows.length) return { found: false, reason: '当前角色权限范围内没有符合条件的客户' }
-      return { count: rows.length, customers: rows.slice(0, a.limit ?? 20) }
+      const customers = rows.slice(0, a.limit ?? 20).map(c => stripFinancials(c, ctx.role))
+      return { count: rows.length, customers }
     },
   },
   {
     name: 'get_customer_detail',
-    description: '按客户名或客户ID查询单个客户详情，含信用额度、已用额度、历史订单数。',
-    allowedRoles: ['sales_rep', 'sales_director', 'ceo'],
+    description: '按客户名或客户ID查询单个客户详情，含历史订单数；销售角色与 CEO 另可见信用额度、已用额度，' +
+      '供应链主管按角色裁剪，不返回这些财务字段。',
+    allowedRoles: ['sales_rep', 'sales_director', 'supply_chain', 'ceo'],
     isWrite: false,
     parameters: {
       type: 'object',
@@ -38,8 +53,11 @@ export const crmTools: ToolDef[] = [
         .find(x => x.id === a.nameOrId || x.name === a.nameOrId)
       if (!c) return { found: false, reason: `未找到客户「${a.nameOrId}」，或当前角色无权查看` }
       const orders = ctx.db.orders.filter(o => o.customerId === c.id)
-      return { ...c, orderCount: orders.length,
-               creditAvailable: c.creditLimit - c.creditUsed }
+      const detail: Record<string, unknown> = { ...c, orderCount: orders.length }
+      if (canSeeCustomerFinancials(ctx.role)) {
+        detail.creditAvailable = c.creditLimit - c.creditUsed
+      }
+      return stripFinancials(detail, ctx.role)
     },
   },
   {
@@ -68,7 +86,7 @@ export const crmTools: ToolDef[] = [
   {
     name: 'create_followup_task',
     description: '为指定负责人创建一条跟进任务。这是写操作，会先请用户确认。',
-    allowedRoles: ['sales_rep', 'sales_director'],
+    allowedRoles: ['sales_rep', 'sales_director', 'ceo'],
     isWrite: true,
     parameters: {
       type: 'object',
