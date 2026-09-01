@@ -40,3 +40,15 @@
 - simulate_delivery_risk 默认 withinDays=14（非 7），供应链主管测算出 SKU-203 缺口 48 台已钉住
 - ⚠️ 坑：本地 npm run dev 不跑 Pages Function，/api/chat 404。需 npx wrangler pages dev，本次沙箱无网络未实测 GLM 实际输出行为，留给 P4 验证
 - 15 个工具全 15 通过 npm test（33/33 全绿，含 P1 的 19 条）；npm run build 通过
+
+## P4 完成 (2026-09-02)
+- <Sidekick /> 自包含，App.tsx 通过 <AppShell sidekick={<Sidekick/>}> 挂载
+- renderWithRefs(text) 把 [[XXX]] 渲染成可跳转 chip，路由映射在 RefChip.tsx 的 ROUTE 表
+- replay.ts 的 runReplay(scenario, emit, requestConfirm) 用于断网兜底，数据取自 generateSeed(42) 真实结果
+  （SO-2026-0428/0435 缺 SKU-203 共 48 台，向锐驰机电下加急单 PO-2026-955，2026-09-07 到货）
+- runReplay 对 confirm_request 分批准/拒绝两条后续剧本，拒绝分支也会正确收尾（不会误报采购成功）
+- ⚠️ 坑：本地必须用 npx wrangler pages dev 才有 /api/chat；本次沙箱无网络，GLM 实际返回格式仍未实机验证，
+  已按 P3 记录的 T3-C 风险不变，Sidekick 的 catch(LlmUnavailable) 分支已实现但走的是 mock 路径未见真实响应
+- ⚠️ 坑（本期新发现，未擅自改 loop.ts，仅记录）：loop.ts 用正文里的正则 `/需要追加步骤[：:]\s*(.+)/`
+  识别动态重规划，且工具调用检测靠 `res.tool_calls` 是否为空来判断"是否收尾"——这两者都要求 GLM 严格按
+  OpenAI tool_calls 结构返回且在文本追加步骤时不同时携带 tool_calls，未见真实响应前无法确认 GLM 是否符合

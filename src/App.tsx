@@ -8,6 +8,7 @@ import Inventory from './pages/Inventory'
 import Purchases from './pages/Purchases'
 import Receivables from './pages/Receivables'
 import SelfTest from './pages/SelfTest'
+import { Sidekick } from './sidekick/Sidekick'
 
 export default function App() {
   return (
@@ -18,7 +19,7 @@ export default function App() {
         <Route
           path="/*"
           element={
-            <AppShell>
+            <AppShell sidekick={<Sidekick />}>
               <Routes>
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/customers" element={<Customers />} />
