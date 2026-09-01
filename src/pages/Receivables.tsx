@@ -2,21 +2,23 @@ import { useStore } from '../lib/store'
 import { DataTable } from '../components/DataTable'
 import { StatusChip, AR_TONE } from '../components/StatusChip'
 import { money, daysFromToday } from '../lib/format'
-import { scopeReceivables } from '../lib/rbac'
+import { scopeReceivables, scopeSummary } from '../lib/rbac'
+import { scopeHeaderText, scopeEmptyText } from '../lib/scopeText'
 
 export default function Receivables() {
   const { db, currentUser } = useStore()
   const rows = scopeReceivables(db, currentUser)
+  const scope = scopeSummary(db, currentUser, 'receivables')
 
   return (
     <div className="space-y-4">
       <div className="flex items-baseline gap-3">
         <h1 className="text-xl font-semibold">应收</h1>
-        <span className="text-sm text-slate-400">{rows.length} 条（已按当前角色权限过滤）</span>
+        <span className="text-sm text-slate-400">{scopeHeaderText(scope)}</span>
       </div>
       <DataTable
         rows={rows}
-        empty="当前角色无权访问应收数据"
+        empty={scopeEmptyText(scope)}
         columns={[
           { key: 'id', title: '应收单号', width: '140px' },
           { key: 'customer', title: '客户', render: (r) =>

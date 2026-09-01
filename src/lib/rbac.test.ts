@@ -2,8 +2,9 @@ import { describe, it, expect } from 'vitest'
 import { generateSeed } from './seed'
 import {
   scopeCustomers, scopeOrders, scopeOpportunities, scopeReceivables, maskOrderForRole,
-  canSeeCustomerFinancials, overrideNoticeFor,
+  canSeeCustomerFinancials, overrideNoticeFor, scopeSummary, boundaryReason,
 } from './rbac'
+import { toolsFor, executeTool } from '../agent/registry'
 
 const db = generateSeed(42)
 const u = (n: string) => db.users.find(x => x.name === n)!
@@ -69,6 +70,58 @@ describe('客户财务字段可见性', () => {
     expect(canSeeCustomerFinancials('sales_rep')).toBe(true)
     expect(canSeeCustomerFinancials('sales_director')).toBe(true)
     expect(canSeeCustomerFinancials('ceo')).toBe(true)
+  })
+})
+
+describe('显式边界：scopeSummary', () => {
+  it('张伟（销售代表）看客户：9/48，basis 为「你本人名下」', () => {
+    const s = scopeSummary(db, u('张伟'), 'customers')
+    expect(s).toEqual({ visible: 9, total: 48, hidden: 39, basis: '你本人名下' })
+  })
+  it('陈立（CEO）看订单：hidden 为 0', () => {
+    const s = scopeSummary(db, u('陈立'), 'orders')
+    expect(s.hidden).toBe(0)
+    expect(s.basis).toBe('全公司')
+  })
+  it('李娜（销售总监）看应收：basis 为「你所在团队」，hidden > 0', () => {
+    const s = scopeSummary(db, u('李娜'), 'receivables')
+    expect(s.basis).toBe('你所在团队')
+    expect(s.hidden).toBeGreaterThan(0)
+  })
+  it('王强（供应链）看客户/订单 basis 为「全公司」，看商机/应收 basis 为「无权查看」', () => {
+    expect(scopeSummary(db, u('王强'), 'customers').basis).toBe('全公司')
+    expect(scopeSummary(db, u('王强'), 'orders').basis).toBe('全公司')
+    expect(scopeSummary(db, u('王强'), 'opportunities').basis).toBe('无权查看')
+    expect(scopeSummary(db, u('王强'), 'receivables').basis).toBe('无权查看')
+  })
+  it('boundaryReason 在 hidden 为 0 与大于 0 时文案不同', () => {
+    const noHidden = boundaryReason({ visible: 5, total: 5, hidden: 0, basis: '全公司' }, 'orders')
+    expect(noHidden).not.toContain('超出你的查看范围')
+    const withHidden = boundaryReason({ visible: 0, total: 120, hidden: 120, basis: '你本人名下' }, 'receivables')
+    expect(withHidden).toContain('全公司另有 120 条，超出你的查看范围')
+  })
+})
+
+describe('显式边界：工具层', () => {
+  const mkCtx = (userName: string) => {
+    const user = u(userName)
+    return { user, role: user.role, db, mutate: () => {} }
+  }
+
+  it('张伟身份调 query_receivables 被 registry 层拒绝（PERMISSION_DENIED），保持 V1 行为不变', () => {
+    expect(toolsFor('sales_rep').some(t => t.name === 'query_receivables')).toBe(false)
+    const r = executeTool('query_receivables', {}, mkCtx('张伟'))
+    expect(r.ok).toBe(false)
+    expect((r.result as any).error).toBe('PERMISSION_DENIED')
+  })
+
+  it('李娜身份调用受限读工具，返回值含 scope 且 scope.hidden > 0', () => {
+    const r = executeTool('query_sales_orders', {}, mkCtx('李娜'))
+    expect(r.ok).toBe(true)
+    const result = r.result as any
+    expect(result.scope).toBeTruthy()
+    expect(result.scope.hidden).toBeGreaterThan(0)
+    expect(result.scope.basis).toBe('你所在团队')
   })
 })
 

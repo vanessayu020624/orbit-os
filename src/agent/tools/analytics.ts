@@ -1,6 +1,6 @@
 import type { ToolDef } from '../../lib/types'
 import { TODAY } from '../../lib/types'
-import { scopeCustomers, scopeOpportunities, scopeOrders, scopeReceivables } from '../../lib/rbac'
+import { scopeCustomers, scopeOpportunities, scopeOrders, scopeReceivables, scopeSummary, boundaryReason } from '../../lib/rbac'
 import { simulateDeliveryRisk } from '../../lib/risk'
 import { daysFromToday } from '../../lib/format'
 
@@ -19,18 +19,19 @@ export const analyticsTools: ToolDef[] = [
       },
     },
     run: (a, ctx) => {
+      const scope = scopeSummary(ctx.db, ctx.user, 'receivables')
       let rows = scopeReceivables(ctx.db, ctx.user)
       if (a.status) rows = rows.filter(r => r.status === a.status)
       const withDays = rows.map(r => ({ r, overdueDays: Math.max(0, -daysFromToday(r.dueDate)) }))
       const filtered = a.overdueDaysMin != null
         ? withDays.filter(x => x.overdueDays >= a.overdueDaysMin)
         : withDays
-      if (!filtered.length) return { found: false, reason: '没有符合条件的应收账款' }
+      if (!filtered.length) return { found: false, reason: boundaryReason(scope, 'receivables') }
       const receivables = filtered.slice(0, a.limit ?? 20).map(({ r, overdueDays }) => ({
         ...r, customerName: ctx.db.customers.find(c => c.id === r.customerId)?.name ?? '—',
         overdueDays,
       }))
-      return { count: filtered.length, receivables }
+      return { scope, count: filtered.length, receivables }
     },
   },
   {
@@ -49,33 +50,37 @@ export const analyticsTools: ToolDef[] = [
     run: (a, ctx) => {
       switch (a.metric) {
         case 'revenue': {
+          const scope = scopeSummary(ctx.db, ctx.user, 'orders')
           const rows = scopeOrders(ctx.db, ctx.user).filter(o => o.status === '已发货' || o.status === '已完成')
-          if (!rows.length) return { found: false, reason: '没有已发货或已完成的订单' }
+          if (!rows.length) return { found: false, reason: boundaryReason(scope, 'orders') }
           const total = rows.reduce((s, o) => s + o.totalAmount, 0)
-          return { metric: 'revenue', count: rows.length, revenue: total }
+          return { scope, metric: 'revenue', count: rows.length, revenue: total }
         }
         case 'funnel': {
+          const scope = scopeSummary(ctx.db, ctx.user, 'opportunities')
           const rows = scopeOpportunities(ctx.db, ctx.user)
-          if (!rows.length) return { found: false, reason: '当前角色权限范围内没有商机' }
+          if (!rows.length) return { found: false, reason: boundaryReason(scope, 'opportunities') }
           const map = new Map<string, { stage: string; count: number; amount: number }>()
           for (const o of rows) {
             const e = map.get(o.stage) ?? { stage: o.stage, count: 0, amount: 0 }
             e.count++; e.amount += o.amount
             map.set(o.stage, e)
           }
-          return { metric: 'funnel', funnel: [...map.values()] }
+          return { scope, metric: 'funnel', funnel: [...map.values()] }
         }
         case 'top_customers': {
+          const scope = scopeSummary(ctx.db, ctx.user, 'customers')
           const rows = [...scopeCustomers(ctx.db, ctx.user)].sort((x, y) => y.annualRevenue - x.annualRevenue)
-          if (!rows.length) return { found: false, reason: '当前角色权限范围内没有客户' }
-          return { metric: 'top_customers', topCustomers: rows.slice(0, a.limit ?? 5) }
+          if (!rows.length) return { found: false, reason: boundaryReason(scope, 'customers') }
+          return { scope, metric: 'top_customers', topCustomers: rows.slice(0, a.limit ?? 5) }
         }
         case 'order_status': {
+          const scope = scopeSummary(ctx.db, ctx.user, 'orders')
           const rows = scopeOrders(ctx.db, ctx.user)
-          if (!rows.length) return { found: false, reason: '当前角色权限范围内没有订单' }
+          if (!rows.length) return { found: false, reason: boundaryReason(scope, 'orders') }
           const map = new Map<string, number>()
           for (const o of rows) map.set(o.status, (map.get(o.status) ?? 0) + 1)
-          return { metric: 'order_status', orderStatus: [...map.entries()].map(([status, count]) => ({ status, count })) }
+          return { scope, metric: 'order_status', orderStatus: [...map.entries()].map(([status, count]) => ({ status, count })) }
         }
         default:
           return { found: false, reason: `未知的聚合口径「${a.metric}」` }
@@ -95,6 +100,7 @@ export const analyticsTools: ToolDef[] = [
       },
     },
     run: (a, ctx) => {
+      const scope = scopeSummary(ctx.db, ctx.user, 'orders')
       let ids: string[]
       let deniedCount = 0
       if (a.orderNos?.length) {
@@ -106,7 +112,7 @@ export const analyticsTools: ToolDef[] = [
         const allowed = requested.filter(x => scopedRefs.has(x))
         deniedCount = requested.length - allowed.length
         if (!allowed.length) {
-          return { found: false, reason: '指定的订单均不在当前角色权限范围内' }
+          return { scope, found: false, reason: `指定的订单均不在当前角色权限范围内（${scope.basis}）` }
         }
         ids = allowed
       } else {
@@ -116,11 +122,11 @@ export const analyticsTools: ToolDef[] = [
                     && o.promisedDeliveryDate >= TODAY && o.promisedDeliveryDate <= horizon)
           .map(o => o.id)
       }
-      if (!ids.length) return { found: false, reason: '没有符合条件的待发货订单' }
+      if (!ids.length) return { scope, found: false, reason: boundaryReason(scope, 'orders') }
       const risks = simulateDeliveryRisk(ctx.db, ids)
-      if (!risks.length) return { found: false, reason: '指定订单未找到' }
+      if (!risks.length) return { scope, found: false, reason: '指定订单未找到' }
       return {
-        count: risks.length, risks,
+        scope, count: risks.length, risks,
         ...(deniedCount > 0 ? {
           deniedCount,
           deniedReason: `另有 ${deniedCount} 个订单不在当前角色权限范围内，已过滤`,

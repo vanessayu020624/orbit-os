@@ -1,6 +1,6 @@
 import type { ToolDef, Product } from '../../lib/types'
 import { TODAY } from '../../lib/types'
-import { scopeOrders, maskOrderForRole } from '../../lib/rbac'
+import { scopeOrders, maskOrderForRole, scopeSummary, boundaryReason } from '../../lib/rbac'
 
 function findProduct(products: Product[], skuOrName: string): Product | undefined {
   return products.find(p => p.sku === skuOrName || p.name === skuOrName)
@@ -22,13 +22,14 @@ export const erpTools: ToolDef[] = [
       },
     },
     run: (a, ctx) => {
+      const scope = scopeSummary(ctx.db, ctx.user, 'orders')
       let rows = scopeOrders(ctx.db, ctx.user)
       if (a.status) rows = rows.filter(o => o.status === a.status)
       if (a.deliveryDateFrom) rows = rows.filter(o => o.promisedDeliveryDate >= a.deliveryDateFrom)
       if (a.deliveryDateTo) rows = rows.filter(o => o.promisedDeliveryDate <= a.deliveryDateTo)
-      if (!rows.length) return { found: false, reason: '当前角色权限范围内没有符合条件的订单' }
+      if (!rows.length) return { found: false, reason: boundaryReason(scope, 'orders') }
       const orders = rows.slice(0, a.limit ?? 20).map(o => maskOrderForRole(o, ctx.role))
-      return { count: rows.length, orders }
+      return { scope, count: rows.length, orders }
     },
   },
   {
@@ -42,14 +43,19 @@ export const erpTools: ToolDef[] = [
       required: ['orderNo'],
     },
     run: (a, ctx) => {
+      const scope = scopeSummary(ctx.db, ctx.user, 'orders')
       const o = scopeOrders(ctx.db, ctx.user).find(x => x.orderNo === a.orderNo)
-      if (!o) return { found: false, reason: `未找到订单「${a.orderNo}」，或当前角色无权查看` }
+      if (!o) {
+        const extra = scope.hidden > 0
+          ? `（${scope.basis}内共 ${scope.visible} 条，另有 ${scope.hidden} 条超出你的查看范围）` : ''
+        return { found: false, reason: `未找到订单「${a.orderNo}」，或当前角色无权查看${extra}` }
+      }
       const c = ctx.db.customers.find(x => x.id === o.customerId)
       const items = o.items.map(l => {
         const p = ctx.db.products.find(x => x.id === l.skuId)
         return { ...l, sku: p?.sku, skuName: p?.name }
       })
-      return { ...maskOrderForRole(o, ctx.role), customerName: c?.name ?? '—', items }
+      return { scope, ...maskOrderForRole(o, ctx.role), customerName: c?.name ?? '—', items }
     },
   },
   {

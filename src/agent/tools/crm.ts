@@ -1,5 +1,5 @@
 import type { Role, ToolDef } from '../../lib/types'
-import { canSeeCustomerFinancials, scopeCustomers, scopeOpportunities } from '../../lib/rbac'
+import { canSeeCustomerFinancials, scopeCustomers, scopeOpportunities, scopeSummary, boundaryReason } from '../../lib/rbac'
 
 /** 供应链主管不需要知道客户的钱：从返回对象里删掉这三个 key（不置 0，置 0 会被模型当成真实数值）。 */
 function stripFinancials<T extends object>(c: T, role: Role): T {
@@ -27,14 +27,15 @@ export const crmTools: ToolDef[] = [
       },
     },
     run: (a, ctx) => {
+      const scope = scopeSummary(ctx.db, ctx.user, 'customers')
       let rows = scopeCustomers(ctx.db, ctx.user)
       if (a.tier) rows = rows.filter(c => c.tier === a.tier)
       if (a.sortByRevenue && canSeeCustomerFinancials(ctx.role)) {
         rows = [...rows].sort((x, y) => y.annualRevenue - x.annualRevenue)
       }
-      if (!rows.length) return { found: false, reason: '当前角色权限范围内没有符合条件的客户' }
+      if (!rows.length) return { found: false, reason: boundaryReason(scope, 'customers') }
       const customers = rows.slice(0, a.limit ?? 20).map(c => stripFinancials(c, ctx.role))
-      return { count: rows.length, customers }
+      return { scope, count: rows.length, customers }
     },
   },
   {
@@ -49,15 +50,20 @@ export const crmTools: ToolDef[] = [
       required: ['nameOrId'],
     },
     run: (a, ctx) => {
+      const scope = scopeSummary(ctx.db, ctx.user, 'customers')
       const c = scopeCustomers(ctx.db, ctx.user)
         .find(x => x.id === a.nameOrId || x.name === a.nameOrId)
-      if (!c) return { found: false, reason: `未找到客户「${a.nameOrId}」，或当前角色无权查看` }
+      if (!c) {
+        const extra = scope.hidden > 0
+          ? `（${scope.basis}内共 ${scope.visible} 条，另有 ${scope.hidden} 条超出你的查看范围）` : ''
+        return { found: false, reason: `未找到客户「${a.nameOrId}」，或当前角色无权查看${extra}` }
+      }
       const orders = ctx.db.orders.filter(o => o.customerId === c.id)
       const detail: Record<string, unknown> = { ...c, orderCount: orders.length }
       if (canSeeCustomerFinancials(ctx.role)) {
         detail.creditAvailable = c.creditLimit - c.creditUsed
       }
-      return stripFinancials(detail, ctx.role)
+      return { scope, ...stripFinancials(detail, ctx.role) }
     },
   },
   {
@@ -74,12 +80,13 @@ export const crmTools: ToolDef[] = [
       },
     },
     run: (a, ctx) => {
+      const scope = scopeSummary(ctx.db, ctx.user, 'opportunities')
       let rows = scopeOpportunities(ctx.db, ctx.user)
       if (a.stage) rows = rows.filter(o => o.stage === a.stage)
       if (a.closeBefore) rows = rows.filter(o => o.expectedCloseDate <= a.closeBefore)
-      if (!rows.length) return { found: false, reason: '当前角色权限范围内没有符合条件的商机' }
+      if (!rows.length) return { found: false, reason: boundaryReason(scope, 'opportunities') }
       const weighted = rows.reduce((s, o) => s + o.amount * o.probability, 0)
-      return { count: rows.length, weightedForecast: Math.round(weighted),
+      return { scope, count: rows.length, weightedForecast: Math.round(weighted),
                opportunities: rows.slice(0, a.limit ?? 20) }
     },
   },

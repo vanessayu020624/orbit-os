@@ -1,5 +1,6 @@
 import { useStore } from '../lib/store'
-import { scopeOrders, maskOrderForRole } from '../lib/rbac'
+import { scopeOrders, maskOrderForRole, scopeSummary } from '../lib/rbac'
+import { scopeHeaderText, scopeEmptyText } from '../lib/scopeText'
 import { DataTable } from '../components/DataTable'
 import { StatusChip, ORDER_TONE } from '../components/StatusChip'
 import { money, daysFromToday } from '../lib/format'
@@ -9,16 +10,17 @@ export default function Orders() {
   const rows = scopeOrders(db, currentUser)
     .map(o => maskOrderForRole(o, currentUser.role))
     .sort((a: any, b: any) => a.promisedDeliveryDate.localeCompare(b.promisedDeliveryDate))
+  const scope = scopeSummary(db, currentUser, 'orders')
 
   return (
     <div className="space-y-4">
       <div className="flex items-baseline gap-3">
         <h1 className="text-xl font-semibold">销售订单</h1>
-        <span className="text-sm text-slate-400">{rows.length} 条（已按当前角色权限过滤）</span>
+        <span className="text-sm text-slate-400">{scopeHeaderText(scope)}</span>
       </div>
       <DataTable
         rows={rows}
-        empty="当前角色无权访问销售订单"
+        empty={scopeEmptyText(scope)}
         columns={[
           { key: 'orderNo', title: '订单号', width: '140px' },
           { key: 'customer', title: '客户', render: (r) =>

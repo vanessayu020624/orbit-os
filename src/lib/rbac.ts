@@ -88,3 +88,58 @@ export function overrideNoticeFor(toolName: string, role: Role): string | null {
   if (!owner || owner === role || role !== 'ceo') return null
   return `越权代办：该操作通常由「${ROLE_META[owner].label}」执行。你以 CEO 身份直接执行，操作会完整留痕。`
 }
+
+// ---- 决定 3：过滤必须自报边界 ----
+
+export type ScopedEntity = 'customers' | 'opportunities' | 'orders' | 'receivables'
+
+export interface ScopeSummary { visible: number; total: number; hidden: number; basis: string }
+
+const ENTITY_LABEL: Record<ScopedEntity, string> = {
+  customers: '客户', opportunities: '商机', orders: '订单', receivables: '应收',
+}
+
+function basisFor(role: Role, entity: ScopedEntity): string {
+  if (role === 'supply_chain') {
+    return entity === 'orders' || entity === 'customers' ? '全公司' : '无权查看'
+  }
+  const byRole: Record<'sales_rep' | 'sales_director' | 'ceo', string> = {
+    sales_rep: '你本人名下', sales_director: '你所在团队', ceo: '全公司',
+  }
+  return byRole[role]
+}
+
+function scopedCount(db: DbSnapshot, user: User, entity: ScopedEntity): number {
+  switch (entity) {
+    case 'customers':     return scopeCustomers(db, user).length
+    case 'orders':        return scopeOrders(db, user).length
+    case 'opportunities': return scopeOpportunities(db, user).length
+    case 'receivables':   return scopeReceivables(db, user).length
+  }
+}
+
+function totalCount(db: DbSnapshot, entity: ScopedEntity): number {
+  switch (entity) {
+    case 'customers':     return db.customers.length
+    case 'orders':        return db.orders.length
+    case 'opportunities': return db.opportunities.length
+    case 'receivables':   return db.receivables.length
+  }
+}
+
+/** 每一处按角色过滤的数据都要能自报边界：看到多少、总共多少、按什么范围过滤的。 */
+export function scopeSummary(db: DbSnapshot, user: User, entity: ScopedEntity): ScopeSummary {
+  const visible = scopedCount(db, user, entity)
+  const total = totalCount(db, entity)
+  return { visible, total, hidden: total - visible, basis: basisFor(user.role, entity) }
+}
+
+/**
+ * 受限读工具在按查询条件过滤后仍是空结果时用：把权限边界写进 reason，
+ * 避免模型把「查询条件下没有」读成「全公司都没有」。
+ */
+export function boundaryReason(s: ScopeSummary, entity: ScopedEntity): string {
+  const label = ENTITY_LABEL[entity]
+  const base = `${s.basis}内没有符合条件的${label}`
+  return s.hidden > 0 ? `${base}；全公司另有 ${s.hidden} 条，超出你的查看范围。` : `${base}。`
+}

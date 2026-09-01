@@ -1,5 +1,6 @@
 import { useStore } from '../lib/store'
-import { canSeeCustomerFinancials, scopeCustomers } from '../lib/rbac'
+import { canSeeCustomerFinancials, scopeCustomers, scopeSummary } from '../lib/rbac'
+import { scopeHeaderText, scopeEmptyText } from '../lib/scopeText'
 import { DataTable } from '../components/DataTable'
 import { StatusChip, type Tone } from '../components/StatusChip'
 import { money } from '../lib/format'
@@ -10,6 +11,7 @@ const TIER_TONE: Record<string, Tone> = { A: 'ok', B: 'info', C: 'idle' }
 export default function Customers() {
   const { db, currentUser } = useStore()
   const rows = scopeCustomers(db, currentUser)
+  const scope = scopeSummary(db, currentUser, 'customers')
   const showFinancials = canSeeCustomerFinancials(currentUser.role)
 
   const columns = [
@@ -32,11 +34,11 @@ export default function Customers() {
     <div className="space-y-4">
       <div className="flex items-baseline gap-3">
         <h1 className="text-xl font-semibold">客户</h1>
-        <span className="text-sm text-slate-400">{rows.length} 条（已按当前角色权限过滤）</span>
+        <span className="text-sm text-slate-400">{scopeHeaderText(scope)}</span>
       </div>
       <DataTable
         rows={rows}
-        empty="当前角色无权访问客户数据"
+        empty={scopeEmptyText(scope)}
         columns={columns}
       />
     </div>
