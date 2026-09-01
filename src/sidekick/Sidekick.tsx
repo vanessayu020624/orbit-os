@@ -27,6 +27,18 @@ function pickScene(q: string): Scene {
   return null
 }
 
+/**
+ * 本轮问答是否该写进会话历史。
+ * 一次问询要 6~40 秒，用户可能中途切角色；切角色的 effect 会同步清空 history.current，
+ * 而 ask() 的 finally 在那之后才跑，会把旧角色的答案写回已清空的历史——下一次提问就带上了
+ * 上一个角色看到的数据，属于越权泄漏（剧本 C 正是切角色对照，最容易撞上）。
+ * 所以：跑到一半被切走了，这一轮的答案直接丢弃，它本来就属于旧角色。
+ * 抽成纯函数是为了在没有 jsdom 的情况下也能对这个判定做回归测试。
+ */
+export function shouldRecordTurn(askUserId: string, currentUserId: string, finalText: string): boolean {
+  return !!finalText && askUserId === currentUserId
+}
+
 type Item =
   | { k: 'user'; text: string }
   | { k: 'plan'; plan: Plan }
@@ -105,11 +117,13 @@ export function Sidekick() {
       onEvent(e)
     }
     const confirmFn = (id: string) => requestConfirm(id)
+    // 本次运行认定的角色。取自 useStore.getState()：即便本次 ask 闭包是 bus 在上一次角色切换时
+    // 注册的旧闭包，这里取的也是调用时刻的实时角色，不会读到渲染快照。
+    // 捕获成常量而不是在下面现取，保证一次运行自始至终是同一个角色（也是 finally 里的比对基准）。
+    const askUser = useStore.getState().currentUser
     try {
-      // currentUser 来自 useStore.getState()：即便本次 ask 闭包是 bus 在上一次角色切换时
-      // 注册的旧闭包，这里取的也是调用时刻的实时角色，不会读到渲染快照。
       await runAgent({
-        question: q, user: useStore.getState().currentUser,
+        question: q, user: askUser,
         getDb: () => useStore.getState().db,
         mutate: applyMutation, emit, pushAudit,
         requestConfirm: (id) => confirmFn(id),
@@ -131,7 +145,8 @@ export function Sidekick() {
           : '当前无法连接模型，且这个问题不在录播的「交期风险排查」与「权限差异」两个场景内。' }])
       }
     } finally {
-      if (finalText) {
+      // 只有当前角色仍然是发起这次提问的角色时，才把这一轮写进历史。见 shouldRecordTurn。
+      if (shouldRecordTurn(askUser.id, useStore.getState().currentUser.id, finalText)) {
         history.current = [...history.current, { q, a: finalText }].slice(-2)
       }
       const u = sumUsage()
