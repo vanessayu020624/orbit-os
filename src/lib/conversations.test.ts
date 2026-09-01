@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   titleFor, newConversation, sanitizeItems,
-  readConversations, writeConversations, MAX_CONVERSATIONS,
+  readConversations, writeConversations,
   activeFor, archivedFor, otherRoleCount, pruneConversations,
   MAX_ACTIVE_PER_USER, MAX_ARCHIVED_PER_USER,
   type Conversation,
@@ -108,12 +108,12 @@ describe('readConversations', () => {
 })
 
 describe('writeConversations', () => {
-  it('超过 MAX_CONVERSATIONS 条时只写前 MAX_CONVERSATIONS 条', () => {
-    const cs = Array.from({ length: MAX_CONVERSATIONS + 5 }, (_, i) => newConversation(`conv-${i}`, 'U-001', i))
+  it('单个角色超过 MAX_ACTIVE_PER_USER 条时只写前 MAX_ACTIVE_PER_USER 条', () => {
+    const cs = Array.from({ length: MAX_ACTIVE_PER_USER + 5 }, (_, i) => newConversation(`conv-${i}`, 'U-001', i))
     const store = fakeStore()
     writeConversations(cs, store)
     const raw = store.getItem('orbitos.sidekick.conversations')!
-    expect((JSON.parse(raw) as unknown[]).length).toBe(MAX_CONVERSATIONS)
+    expect((JSON.parse(raw) as unknown[]).length).toBe(MAX_ACTIVE_PER_USER)
   })
   it('setItem 抛异常时不抛出', () => {
     const store = { setItem: () => { throw new Error('quota') } }

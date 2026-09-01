@@ -16,8 +16,7 @@ export interface Conversation {
 }
 
 const KEY = 'orbitos.sidekick.conversations'
-// 保留旧名字导出，避免破坏已有测试对它的直接引用；新代码一律用下面两个按角色分组的上限。
-export const MAX_CONVERSATIONS = 20
+// 上限按 userId 分组，不是全局：全局上限会让来回切角色把某个角色的会话挤没。
 export const MAX_ACTIVE_PER_USER = 20
 export const MAX_ARCHIVED_PER_USER = 30
 
