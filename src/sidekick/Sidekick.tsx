@@ -4,6 +4,7 @@ import { useStore } from '../lib/store'
 import { ROLE_META } from '../lib/rbac'
 import { toolsFor } from '../agent/registry'
 import { runAgent } from '../agent/loop'
+import { LlmRateLimited, resetUsage, sumUsage } from '../agent/llm'
 import { runReplay } from '../agent/replay'
 import { onAskAgent } from '../lib/bus'
 import { PlanChecklist, type StepState } from './PlanChecklist'
@@ -33,6 +34,7 @@ type Item =
   | { k: 'confirm'; id: string; toolName: string; summary: string; resolved?: boolean }
   | { k: 'final'; text: string; refs: string[] }
   | { k: 'error'; text: string }
+  | { k: 'divider'; text: string }
 
 export function Sidekick() {
   // 不要解构 db——本组件不用它，vite react-ts 模板开了 noUnusedLocals，会直接构建失败
@@ -47,6 +49,9 @@ export function Sidekick() {
   // busy 状态用于渲染禁用输入框；busyRef 供 ask() 内部做实时并发拦截，
   // 避免 bus 订阅注册的旧闭包读到渲染时快照的 busy（见下方 useEffect 的说明）。
   const busyRef = useRef(false)
+  // 最近两轮问答，喂给 planner/executor 让追问能理解指代。
+  // 切换角色时必须清空——把 A 角色看到的数据带进 B 角色的上下文是越权泄漏。
+  const history = useRef<{ q: string; a: string }[]>([])
 
   const toolCount = toolsFor(currentUser.role).length
 
@@ -89,6 +94,16 @@ export function Sidekick() {
     busyRef.current = true
     setBusy(true); setInput('')
     setItems(p => [...p, { k: 'user', text: q }])
+    // 真跑成功时不该再挂着上一次失败留下的「录播模式」徽章。
+    setReplayMode(false)
+    resetUsage()
+
+    // onEvent 拿不到问题文本，所以在这里接住本轮的 final 文本，回头连同 q 一起进历史。
+    let finalText = ''
+    const emit = (e: AgentEvent) => {
+      if (e.type === 'final') finalText = e.text
+      onEvent(e)
+    }
     const confirmFn = (id: string) => requestConfirm(id)
     try {
       // currentUser 来自 useStore.getState()：即便本次 ask 闭包是 bus 在上一次角色切换时
@@ -96,19 +111,34 @@ export function Sidekick() {
       await runAgent({
         question: q, user: useStore.getState().currentUser,
         getDb: () => useStore.getState().db,
-        mutate: applyMutation, emit: onEvent, pushAudit,
+        mutate: applyMutation, emit, pushAudit,
         requestConfirm: (id) => confirmFn(id),
+        history: history.current,
       })
-    } catch {
+    } catch (e) {
+      const limited = e instanceof LlmRateLimited
       setReplayMode(true)
       const scene = pickScene(q)
+      // 真实卡片已经 emit 过一部分，录播从这里接管，必须有肉眼可见的分界。
+      setItems(p => [...p, { k: 'divider', text: limited
+        ? '模型并发已满（1302），以下为录播内容'
+        : '模型连接失败，以下为录播内容' }])
       if (scene) {
-        await runReplay(scene, onEvent, (id) => confirmFn(id))
+        await runReplay(scene, emit, (id) => confirmFn(id))
       } else {
-        setItems(p => [...p, { k: 'error', text:
-          '当前网络不可用，已切换到录播模式。录播仅内置「交期风险排查」与「权限差异」两个演示场景，这个问题需要联网后重试。' }])
+        setItems(p => [...p, { k: 'error', text: limited
+          ? '智谱免费档并发上限为 2 路，当前已占满（错误码 1302），且这个问题不在录播的两个场景内。稍等几秒重试即可。'
+          : '当前无法连接模型，且这个问题不在录播的「交期风险排查」与「权限差异」两个场景内。' }])
       }
     } finally {
+      if (finalText) {
+        history.current = [...history.current, { q, a: finalText }].slice(-2)
+      }
+      const u = sumUsage()
+      if (u.total_tokens > 0) {
+        setItems(p => [...p, { k: 'divider',
+          text: `本次问询消耗 ${u.total_tokens} tokens（输入 ${u.prompt_tokens} / 输出 ${u.completion_tokens}）` }])
+      }
       busyRef.current = false
       setBusy(false)
     }
@@ -118,6 +148,10 @@ export function Sidekick() {
   // useStore.getState() 读取实时 currentUser、用 busyRef 做并发拦截，因此即便这里注册进
   // bus 的 ask 是角色切换那一刻捕获的闭包，也不会读到过期状态（P5 brief 提示的坑，已处理）。
   useEffect(() => onAskAgent(ask), [currentUser])
+
+  // 切角色即清空会话历史。可见的对话记录**保留**（剧本 C 靠上下对照），
+  // 但喂给模型的上下文必须清掉，否则会把上一个角色的数据带进新角色的推理里。
+  useEffect(() => { history.current = [] }, [currentUser])
 
   function decide(id: string, ok: boolean) {
     pending.current.get(id)?.(ok)
@@ -151,6 +185,13 @@ export function Sidekick() {
             case 'confirm': return <ConfirmCard key={i} {...it} onDecide={ok => decide(it.id, ok)} />
             case 'final': return <FinalAnswer key={i} text={it.text} refs={it.refs} />
             case 'error': return <div key={i} className="text-xs text-danger bg-danger/5 rounded p-2">{it.text}</div>
+            case 'divider': return (
+              <div key={i} className="flex items-center gap-2 py-1">
+                <div className="flex-1 h-px bg-slate-200" />
+                <span className="text-[10px] text-slate-400 whitespace-nowrap">{it.text}</span>
+                <div className="flex-1 h-px bg-slate-200" />
+              </div>
+            )
           }
         })}
       </div>

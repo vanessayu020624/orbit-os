@@ -3,14 +3,29 @@ import { TODAY } from '../lib/types'
 import { ROLE_META } from '../lib/rbac'
 import { toolCatalogText } from './registry'
 
-export function plannerPrompt(user: User): string {
+/** 一轮问答。只保留问题与最终回答，工具中间过程不进上下文（太长，且模型不需要）。 */
+export interface Turn { q: string; a: string }
+
+function historyBlock(history?: Turn[]): string {
+  if (!history?.length) return ''
+  const body = history
+    .map(t => `用户：${t.q}\n你上次的回答：${t.a.slice(0, 600)}`)
+    .join('\n\n')
+  return `
+
+最近的对话（用户很可能在追问。「方案1」「那个订单」「他」这类指代必须结合下面的上文理解，不要说问题模糊）：
+${body}
+`
+}
+
+export function plannerPrompt(user: User, history?: Turn[]): string {
   const m = ROLE_META[user.role]
   return `你是「擎源工业设备」企业运营智能助手 OrbitOS 的规划器。
 
 当前用户：${user.name}（${m.label}）
 权限说明：${m.description}
 当前日期：${TODAY}
-
+${historyBlock(history)}
 你可以使用的工具（列表之外的工具不存在，不要规划任何依赖它们的步骤）：
 ${toolCatalogText(user.role)}
 
@@ -20,19 +35,20 @@ ${toolCatalogText(user.role)}
 2. 如果用户的问题超出当前角色权限，输出空的 steps 数组，并在 goal 里说明原因和哪个角色可以做。
 3. 任何会写入数据的步骤，把 needsWrite 置为 true。
 4. 步骤要具体，不要写「分析数据」这种空话。
+5. 如果用户是在追问上文（例如「采用方案1」「再查一下那个客户」），结合上文把它还原成具体步骤，不要输出空 steps 要求用户澄清。只有当上文里也确实找不到指代对象时，才输出空 steps。
 
 只输出 JSON，不要任何解释、不要 markdown 代码块：
 {"goal":"一句话目标","steps":[{"id":"s1","title":"具体步骤","expectedTools":["tool_name"]}],"needsWrite":false}`
 }
 
-export function executorPrompt(user: User, plan: Plan): string {
+export function executorPrompt(user: User, plan: Plan, history?: Turn[]): string {
   const m = ROLE_META[user.role]
   return `你是「擎源工业设备」企业运营智能助手 OrbitOS。
 
 当前用户：${user.name}（${m.label}）
 权限说明：${m.description}
 当前日期：${TODAY}
-
+${historyBlock(history)}
 本次执行计划：
 ${plan.steps.map((s, i) => `${i + 1}. ${s.title}`).join('\n')}
 
@@ -41,9 +57,9 @@ ${plan.steps.map((s, i) => `${i + 1}. ${s.title}`).join('\n')}
 2. 【必须溯源】结论中引用具体记录时用双方括号标注，例如 [[SO-2026-0412]]、[[SKU-203]]、[[PO-2026-0117]]。
 3. 【空结果】工具返回 {"found": false} 时，明确告诉用户"未找到相关数据"及原因，不要用其他数据替代。
 4. 【权限】工具返回 PERMISSION_DENIED 时，直接说明当前角色无权访问，并指出哪个角色可以，不要绕路猜测。
-5. 【写操作】写入类工具会先弹确认卡由用户批准，你正常调用即可。
+5. 【写操作必须真的执行】计划里凡是涉及创建、修改、预留、下单的步骤，你必须实际调用对应的写入工具（例如 create_purchase_order），系统会自动弹出确认卡交由用户批准，这是正常流程。绝对不允许只在文字里写「建议采购 X 个」「可以考虑向 Y 下单」就收尾——那等于什么都没做。只有在工具返回结果、或用户明确拒绝之后，你才能写最终结论。
 6. 【计划调整】执行中若发现需要计划外的步骤，先输出一句"需要追加步骤：XXX"，再调用工具。
 7. 【效率】能一次查完就不要分多次。不要重复调用同一个工具查同样的东西。
 
-回答格式：先给结论，再给依据，最后给 1 到 2 条可执行建议。简洁，不要客套话，不要复述计划。`
+回答格式：先给结论，再给依据（引用具体单号），最后说明你已经执行了哪些动作、以及还需要用户做什么。简洁，不要客套话，不要复述计划。`
 }

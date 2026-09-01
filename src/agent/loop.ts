@@ -1,7 +1,7 @@
 import type { AgentEvent, Plan, ToolContext, User, Mutation, PlanStep } from '../lib/types'
 import { chat, extractJson, LlmUnavailable, type ChatMessage } from './llm'
-import { plannerPrompt, executorPrompt } from './prompts'
-import { toolSchemasFor, executeTool, auditOf, ALL_TOOLS } from './registry'
+import { plannerPrompt, executorPrompt, type Turn } from './prompts'
+import { toolSchemasFor, executeTool, auditOf, ALL_TOOLS, toolsFor } from './registry'
 import type { DbSnapshot, AuditEntry } from '../lib/types'
 
 export interface RunAgentOptions {
@@ -13,6 +13,8 @@ export interface RunAgentOptions {
   pushAudit: (e: AuditEntry) => void
   /** 返回 true 表示用户批准。UI 负责弹卡并 resolve。 */
   requestConfirm: (id: string, toolName: string, args: unknown, summary: string) => Promise<boolean>
+  /** 最近几轮问答，用于让追问能理解指代。不传则按单轮处理。 */
+  history?: Turn[]
 }
 
 const MAX_TURNS = 12
@@ -27,7 +29,7 @@ export async function runAgent(o: RunAgentOptions): Promise<void> {
     const res = await chat({
       jsonMode: true,
       messages: [
-        { role: 'system', content: plannerPrompt(o.user) },
+        { role: 'system', content: plannerPrompt(o.user, o.history) },
         { role: 'user', content: o.question },
       ],
     })
@@ -39,19 +41,26 @@ export async function runAgent(o: RunAgentOptions): Promise<void> {
       ? 'LLM 服务不可用，已切换录播模式' : `规划失败：${String(e)}` })
     throw e
   }
-  o.emit({ type: 'plan', plan })
-
+  // 空计划时 plan.goal 会同时渲染成计划卡标题和 final 卡，同一句话在屏幕上出现两遍。
+  // 所以先判空、只发 final；有步骤时才发计划卡。
   if (!plan.steps.length) {
     o.emit({ type: 'final', text: plan.goal || '当前角色无权处理该请求。', refs: [] })
     return
   }
+  o.emit({ type: 'plan', plan })
 
   // ---------- Phase 2: Executor ----------
   const messages: ChatMessage[] = [
-    { role: 'system', content: executorPrompt(o.user, plan) },
+    { role: 'system', content: executorPrompt(o.user, plan, o.history) },
     { role: 'user', content: o.question },
   ]
   const tools = toolSchemasFor(o.user.role)
+  // 本角色可用的写入工具名集合。CEO 没有写工具 → 集合为空 → 永远不会补推。
+  const writeToolNames = new Set(
+    toolsFor(o.user.role).filter(t => t.isWrite).map(t => t.name)
+  )
+  let executedWrite = false
+  let nudged = false
   let stepIdx = 0
   o.emit({ type: 'step_start', stepId: plan.steps[0].id })
 
@@ -77,6 +86,21 @@ export async function runAgent(o: RunAgentOptions): Promise<void> {
 
     const calls = res.tool_calls ?? []
     if (!calls.length) {
+      // 实盘复现：计划里含写入步骤时，模型常用「建议你去采购 X 个」这样的文字收尾，
+      // 而不去真的调用 create_purchase_order，导致确认卡与后续联动全部不发生。
+      // 这里补推一次。只补一次，避免模型坚持不调用时死循环。
+      const planHasWriteStep = plan.steps.some(
+        s => s.expectedTools?.some(t => writeToolNames.has(t))
+      )
+      if (!nudged && !executedWrite && planHasWriteStep) {
+        nudged = true
+        messages.push({
+          role: 'user',
+          content: '计划中还有尚未执行的写入步骤。请直接调用对应的写入工具去完成它，不要只用文字给建议。如果你判断确实不需要执行，请明确说明原因。',
+        })
+        continue
+      }
+
       // 没有工具调用 = 收尾
       for (let i = stepIdx; i < plan.steps.length; i++) {
         o.emit({ type: 'step_done', stepId: plan.steps[i].id })
@@ -110,6 +134,7 @@ export async function runAgent(o: RunAgentOptions): Promise<void> {
       }
 
       const r = executeTool(name, args, ctx())
+      if (def?.isWrite) executedWrite = true
       o.pushAudit(auditOf(name, args, r, ctx()))
       o.emit({ type: 'tool_result', id: call.id, result: r.result, ms: r.ms })
       messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(r.result) })
