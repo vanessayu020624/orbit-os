@@ -8,3 +8,16 @@
 - 国内手机流量访问：通过 / 未通过（待人工填写 —— 需人工用手机 4G/5G 实测）
 - 技术栈已装：react-ts, tailwind@3, zustand, recharts, react-router-dom, vitest
 - ⚠️ 坑：`functions/api/chat.ts` 用到的 `PagesFunction<Env>` 类型默认无法被 TypeScript 解析，已装 `@cloudflare/workers-types` 并新增 `functions/tsconfig.json` 接入根 `tsconfig.json` 的 project references 以便 `npm run build` 一并类型检查
+
+## P1 完成 (2026-09-02)
+- src/lib/types.ts 导出全部实体、Mutation、AgentEvent、ToolDef、ToolContext、TODAY='2026-09-02'
+- generateSeed(42) → DbSnapshot；埋雷已由 seed.test.ts 8 条断言锁定，改动后必须重跑
+- useStore(): { db, currentUser, auditLog, setRole(role), applyMutation(m), pushAudit(e), reset() }
+- rbac: ROLE_META / scopeCustomers / scopeOrders / scopeOpportunities / maskOrderForRole
+- risk: simulateDeliveryRisk(db, orderIds) / buildRiskCards(db, user)
+- ⚠️ 坑：Inventory.available 是计算字段，改 onHand/reserved 后必须手动重算
+- ⚠️ 坑：applyPlantedScenario 必须在随机生成之后调用，否则埋雷被覆盖
+- ⚠️ 坑（brief 里没写）：随机 Product 的 sku 编号区间是 SKU-101~160，不含 SKU-203；
+  applyPlantedScenario 里用 `db.products.find(sku==='SKU-203') ?? db.products[2]` 兜底改号后再覆盖字段
+- ⚠️ 坑（brief 里没写）：过滤已有「在途」采购单时可能删掉不止 1 条，原 while 循环只处理超编不处理
+  缺编，已加补齐逻辑把 purchaseOrders 数量稳定钉回 55
