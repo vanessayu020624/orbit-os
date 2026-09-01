@@ -6,6 +6,7 @@ import { ToolCallCard } from './ToolCallCard'
 import { ConfirmCard } from './ConfirmCard'
 import { FinalAnswer } from './FinalAnswer'
 import { PRESETS, useSidekick } from './SidekickProvider'
+import { ConversationBar } from './ConversationBar'
 
 export function Sidekick() {
   // 不要解构 db——本组件不用它，vite react-ts 模板开了 noUnusedLocals，会直接构建失败
@@ -24,6 +25,8 @@ export function Sidekick() {
           {currentUser.name} · {ROLE_META[currentUser.role].label} · 可用工具 {toolCount} 个
         </div>
       </div>
+
+      <ConversationBar />
 
       <div className="flex-1 overflow-auto p-3 space-y-2.5">
         {!c.items.length && (
@@ -52,9 +55,14 @@ export function Sidekick() {
       </div>
 
       <div className="border-t p-3 space-y-2">
+        {c.readOnly && c.readOnlyOwner && (
+          <div className="text-[11px] text-slate-400 bg-slate-50 rounded px-2 py-1.5 leading-relaxed">
+            这是【{c.readOnlyOwner.name} · {c.readOnlyOwner.roleLabel}】的会话，切换到该角色后才能继续提问。
+          </div>
+        )}
         <div className="flex flex-wrap gap-1.5">
           {PRESETS.map(p => (
-            <button key={p} onClick={() => c.ask(p)} disabled={c.busy}
+            <button key={p} onClick={() => c.ask(p)} disabled={c.busy || c.readOnly}
               className="text-[11px] px-2 py-1 rounded-full border text-slate-500
                          hover:border-brand hover:text-brand disabled:opacity-40">
               {p.length > 16 ? p.slice(0, 16) + '…' : p}
@@ -64,9 +72,9 @@ export function Sidekick() {
         <div className="flex gap-2">
           <input value={c.input} onChange={e => c.setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && c.ask(c.input)}
-            placeholder={c.busy ? '执行中…' : '问点什么…'} disabled={c.busy}
+            placeholder={c.busy ? '执行中…' : '问点什么…'} disabled={c.busy || c.readOnly}
             className="flex-1 px-3 py-2 rounded-lg border text-sm outline-none focus:border-brand" />
-          <button onClick={() => c.ask(c.input)} disabled={c.busy}
+          <button onClick={() => c.ask(c.input)} disabled={c.busy || c.readOnly}
             className="px-3 py-2 rounded-lg bg-brand text-white text-sm disabled:opacity-40">发送</button>
         </div>
       </div>

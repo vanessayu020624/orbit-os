@@ -31,7 +31,7 @@ const NAV_GROUPS: NavGroup[] = [
 export function AppShell({ children, sidekick }: { children: ReactNode; sidekick?: ReactNode }) {
   const { currentUser, reset } = useStore()
   const meta = ROLE_META[currentUser.role]
-  const { open, setOpen, wide, setWide, busy } = useSidekick()
+  const { open, setOpen, wide, setWide, busy, resetConversations } = useSidekick()
   const location = useLocation()
   const onAgentPage = location.pathname === '/agent'
   return (
@@ -78,7 +78,7 @@ export function AppShell({ children, sidekick }: { children: ReactNode; sidekick
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-14 shrink-0 bg-white border-b flex items-center justify-between px-6">
           <RoleSwitcher />
-          <button onClick={reset}
+          <button onClick={() => { reset(); resetConversations() }}
             className="text-sm text-slate-500 hover:text-danger px-3 py-1.5 rounded hover:bg-slate-50">
             重置演示数据
           </button>

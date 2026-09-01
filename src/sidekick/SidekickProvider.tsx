@@ -5,8 +5,12 @@ import { runAgent } from '../agent/loop'
 import { LlmRateLimited, resetUsage, sumUsage } from '../agent/llm'
 import { runReplay } from '../agent/replay'
 import { onAskAgent } from '../lib/bus'
+import { ROLE_META } from '../lib/rbac'
 import type { StepState } from './PlanChecklist'
 import { readUiPrefs, writeUiPrefs } from '../lib/uiPrefs'
+import {
+  type Conversation, readConversations, writeConversations, newConversation, titleFor,
+} from '../lib/conversations'
 
 const PRESETS = [
   '未来两周要交付的订单有风险吗？帮我排查并给出处理方案。',
@@ -58,6 +62,15 @@ export interface SidekickCtx {
   setOpen: (v: boolean) => void
   wide: boolean            // 宽档位：false=380px，true=560px
   setWide: (v: boolean) => void
+  conversations: Conversation[]
+  activeId: string
+  activeConversation: Conversation
+  readOnly: boolean
+  readOnlyOwner: { name: string; roleLabel: string } | null
+  newChat: () => void
+  switchChat: (id: string) => void
+  deleteChat: (id: string) => void
+  resetConversations: () => void
 }
 
 const Ctx = createContext<SidekickCtx | null>(null)
@@ -70,9 +83,24 @@ export function useSidekick(): SidekickCtx {
 
 export { PRESETS }
 
+function newConvId(): string {
+  return `conv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
 export function SidekickProvider({ children }: { children: ReactNode }) {
   const { currentUser, applyMutation, pushAudit } = useStore()
-  const [items, setItems] = useState<Item[]>([])
+
+  // 必须惰性初始化：Provider 包着整棵应用树，一次问询会 emit 几十个事件、每个都触发重渲染，
+  // 非惰性写法会在每次渲染上做一次同步 localStorage.getItem + JSON.parse 再把结果丢掉。
+  // 初始化：读回会话；列表为空就用 newConversation 造一条并设为 active；非空则 active 取第 0 条。
+  const [conversations, setConversations] = useState<Conversation[]>(() => {
+    const cs = readConversations()
+    return cs.length > 0 ? cs : [newConversation(newConvId(), currentUser.id, Date.now())]
+  })
+  const [activeId, setActiveId] = useState<string>(() => conversations[0].id)
+  const activeIdRef = useRef(activeId)
+  useEffect(() => { activeIdRef.current = activeId }, [activeId])
+
   const [steps, setSteps] = useState<Record<string, StepState>>({})
   const [amended, setAmended] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
@@ -82,9 +110,6 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
   // busy 状态用于渲染禁用输入框；busyRef 供 ask() 内部做实时并发拦截，
   // 避免 bus 订阅注册的旧闭包读到渲染时快照的 busy（见下方 useEffect 的说明）。
   const busyRef = useRef(false)
-  // 最近两轮问答，喂给 planner/executor 让追问能理解指代。
-  // 切换角色时必须清空——把 A 角色看到的数据带进 B 角色的上下文是越权泄漏。
-  const history = useRef<{ q: string; a: string }[]>([])
 
   // 必须惰性初始化：Provider 包着整棵应用树，一次问询会 emit 几十个事件、每个都触发重渲染，
   // 非惰性写法会在每次渲染上做一次同步 localStorage.getItem + JSON.parse 再把结果丢掉。
@@ -92,15 +117,33 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
   const [wide, setWide] = useState(() => readUiPrefs().wide)
 
   useEffect(() => { writeUiPrefs({ open, wide }) }, [open, wide])
+  useEffect(() => { writeConversations(conversations) }, [conversations])
+
+  const activeConversation = conversations.find(c => c.id === activeId) ?? conversations[0]
+  const items = activeConversation.items
+  const readOnly = activeConversation.userId !== currentUser.id
+  const owner = readOnly ? useStore.getState().db.users.find(u => u.id === activeConversation.userId) : undefined
+  const readOnlyOwner = readOnly
+    ? { name: owner?.name ?? '—', roleLabel: owner ? ROLE_META[owner.role].label : '—' }
+    : null
+
+  // 更新活跃会话的 items（同步刷新 title）。必须是函数式更新——高频 emit 下闭包读旧 state 会丢事件
+  // （P5 复审专门核过的点）。用 activeIdRef 而不是闭包里的 activeId，因为 onEvent 会被 runAgent
+  // 反复调用，闭包可能是旧渲染的快照；activeIdRef 保证一次问询的全部事件写进同一个会话，
+  // 哪怕用户中途切了会话。
+  function updateActiveItems(fn: (items: Item[]) => Item[]) {
+    setConversations(cs => cs.map(c => c.id === activeIdRef.current
+      ? { ...c, items: fn(c.items), title: titleFor(fn(c.items)) } : c))
+  }
 
   function onEvent(e: AgentEvent) {
     switch (e.type) {
       case 'plan':
-        setItems(p => [...p, { k: 'plan', plan: e.plan }])
+        updateActiveItems(p => [...p, { k: 'plan', plan: e.plan }])
         setSteps(Object.fromEntries(e.plan.steps.map(s => [s.id, 'pending' as StepState])))
         break
       case 'plan_amended':
-        setItems(p => p.map(it => it.k === 'plan'
+        updateActiveItems(p => p.map(it => it.k === 'plan'
           ? { ...it, plan: { ...it.plan, steps: [...it.plan.steps, ...e.addedSteps] } } : it))
         setAmended(s => new Set([...s, ...e.addedSteps.map(x => x.id)]))
         setSteps(s => ({ ...s, ...Object.fromEntries(e.addedSteps.map(x => [x.id, 'pending' as StepState])) }))
@@ -108,19 +151,19 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
       case 'step_start': setSteps(s => ({ ...s, [e.stepId]: 'running' })); break
       case 'step_done':  setSteps(s => ({ ...s, [e.stepId]: 'done' })); break
       case 'tool_call':
-        setItems(p => [...p, { k: 'tool', id: e.id, name: e.name, args: e.args }]); break
+        updateActiveItems(p => [...p, { k: 'tool', id: e.id, name: e.name, args: e.args }]); break
       case 'tool_result':
-        setItems(p => p.map(it => it.k === 'tool' && it.id === e.id
+        updateActiveItems(p => p.map(it => it.k === 'tool' && it.id === e.id
           ? { ...it, result: e.result, ms: e.ms } : it)); break
       case 'confirm_request':
-        setItems(p => [...p, { k: 'confirm', id: e.id, toolName: e.toolName, summary: e.summary }]); break
+        updateActiveItems(p => [...p, { k: 'confirm', id: e.id, toolName: e.toolName, summary: e.summary }]); break
       case 'confirm_resolved':
-        setItems(p => p.map(it => it.k === 'confirm' && it.id === e.id
+        updateActiveItems(p => p.map(it => it.k === 'confirm' && it.id === e.id
           ? { ...it, resolved: e.approved } : it)); break
       case 'final':
-        setItems(p => [...p, { k: 'final', text: e.text, refs: e.refs }]); break
+        updateActiveItems(p => [...p, { k: 'final', text: e.text, refs: e.refs }]); break
       case 'error':
-        setItems(p => [...p, { k: 'error', text: e.message }]); break
+        updateActiveItems(p => [...p, { k: 'error', text: e.message }]); break
     }
   }
 
@@ -129,9 +172,13 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
 
   async function ask(q: string) {
     if (busyRef.current || !q.trim()) return
+    // 只读会话第二道防线：UI 已经禁用了入口，这里再拦一次（和工具层的双层 RBAC 同一个思路）。
+    const askConvId = activeIdRef.current
+    const askConv = conversations.find(c => c.id === askConvId)
+    if (!askConv || askConv.userId !== useStore.getState().currentUser.id) return
     busyRef.current = true
     setBusy(true); setInput('')
-    setItems(p => [...p, { k: 'user', text: q }])
+    updateActiveItems(p => [...p, { k: 'user', text: q }])
     // 真跑成功时不该再挂着上一次失败留下的「录播模式」徽章。
     setReplayMode(false)
     resetUsage()
@@ -153,31 +200,32 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
         getDb: () => useStore.getState().db,
         mutate: applyMutation, emit, pushAudit,
         requestConfirm: (id) => confirmFn(id),
-        history: history.current,
+        history: askConv.history,
       })
     } catch (e) {
       const limited = e instanceof LlmRateLimited
       setReplayMode(true)
       const scene = pickScene(q)
       // 真实卡片已经 emit 过一部分，录播从这里接管，必须有肉眼可见的分界。
-      setItems(p => [...p, { k: 'divider', text: limited
+      updateActiveItems(p => [...p, { k: 'divider', text: limited
         ? '模型并发已满（1302），以下为录播内容'
         : '模型连接失败，以下为录播内容' }])
       if (scene) {
         await runReplay(scene, askUser, emit, (id) => confirmFn(id))
       } else {
-        setItems(p => [...p, { k: 'error', text: limited
+        updateActiveItems(p => [...p, { k: 'error', text: limited
           ? '智谱免费档并发上限为 2 路，当前已占满（错误码 1302），且这个问题不在录播的两个场景内。稍等几秒重试即可。'
           : '当前无法连接模型，且这个问题不在录播的「交期风险排查」与「权限差异」两个场景内。' }])
       }
     } finally {
       // 只有当前角色仍然是发起这次提问的角色时，才把这一轮写进历史。见 shouldRecordTurn。
       if (shouldRecordTurn(askUser.id, useStore.getState().currentUser.id, finalText)) {
-        history.current = [...history.current, { q, a: finalText }].slice(-2)
+        setConversations(cs => cs.map(c => c.id === askConvId
+          ? { ...c, history: [...c.history, { q, a: finalText }].slice(-2) } : c))
       }
       const u = sumUsage()
       if (u.total_tokens > 0) {
-        setItems(p => [...p, { k: 'divider',
+        updateActiveItems(p => [...p, { k: 'divider',
           text: `本次问询消耗 ${u.total_tokens} tokens（输入 ${u.prompt_tokens} / 输出 ${u.completion_tokens}）` }])
       }
       busyRef.current = false
@@ -191,18 +239,48 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
   // 抽屉可能是收起的：先展开再问，否则点击看起来毫无反应。
   useEffect(() => onAskAgent((q) => { setOpen(true); ask(q) }), [currentUser])
 
-  // 切角色即清空会话历史。可见的对话记录**保留**（剧本 C 靠上下对照），
-  // 但喂给模型的上下文必须清掉，否则会把上一个角色的数据带进新角色的推理里。
-  useEffect(() => { history.current = [] }, [currentUser])
-
   function decide(id: string, ok: boolean) {
     pending.current.get(id)?.(ok)
     pending.current.delete(id)
   }
 
+  function newChat() {
+    if (busy) return
+    const c = newConversation(newConvId(), useStore.getState().currentUser.id, Date.now())
+    setSteps({}); setAmended(new Set())
+    setConversations(cs => [c, ...cs])
+    setActiveId(c.id)
+  }
+
+  function switchChat(id: string) {
+    if (busy) return
+    if (!conversations.some(c => c.id === id)) return
+    setSteps({}); setAmended(new Set())
+    setActiveId(id)
+  }
+
+  function deleteChat(id: string) {
+    const rest = conversations.filter(c => c.id !== id)
+    const next = rest.length > 0 ? rest : [newConversation(newConvId(), useStore.getState().currentUser.id, Date.now())]
+    setConversations(next)
+    if (id === activeIdRef.current) {
+      setSteps({}); setAmended(new Set())
+      setActiveId(next[0].id)
+    }
+  }
+
+  function resetConversations() {
+    const c = newConversation(newConvId(), useStore.getState().currentUser.id, Date.now())
+    setSteps({}); setAmended(new Set())
+    setConversations([c])
+    setActiveId(c.id)
+  }
+
   const value: SidekickCtx = {
     items, steps, amended, busy, replayMode, input, setInput, ask, decide,
     open, setOpen, wide, setWide,
+    conversations, activeId, activeConversation, readOnly, readOnlyOwner,
+    newChat, switchChat, deleteChat, resetConversations,
   }
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
