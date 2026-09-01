@@ -1,8 +1,9 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { useStore } from '../lib/store'
 import { ROLE_META } from '../lib/rbac'
 import { RoleSwitcher } from './RoleSwitcher'
+import { useSidekick } from '../sidekick/SidekickProvider'
 
 const NAV = [
   { to: '/',             label: '仪表盘' },
@@ -17,6 +18,9 @@ const NAV = [
 export function AppShell({ children, sidekick }: { children: ReactNode; sidekick?: ReactNode }) {
   const { currentUser, reset } = useStore()
   const meta = ROLE_META[currentUser.role]
+  const { open, setOpen, wide, setWide, busy } = useSidekick()
+  const location = useLocation()
+  const onAgentPage = location.pathname === '/agent'
   return (
     <div className="flex h-full">
       <nav className="w-48 shrink-0 bg-white border-r flex flex-col">
@@ -50,9 +54,36 @@ export function AppShell({ children, sidekick }: { children: ReactNode; sidekick
         <main className="flex-1 overflow-auto p-6">{children}</main>
       </div>
 
-      <aside className="w-[420px] shrink-0 bg-white border-l flex flex-col">
-        {sidekick ?? <div className="p-6 text-slate-400 text-sm">AI Sidekick（P4 实现）</div>}
-      </aside>
+      {!onAgentPage && open && (
+        <aside className={`${wide ? 'w-[560px]' : 'w-[380px]'} shrink-0 bg-white border-l flex flex-col`}>
+          <div className="px-3 py-2 border-b flex items-center justify-end gap-2 shrink-0">
+            <NavLink to="/agent"
+              className="text-xs text-slate-500 hover:text-brand px-2 py-1 rounded hover:bg-slate-50">
+              在新页面打开 ↗
+            </NavLink>
+            <button onClick={() => setWide(!wide)}
+              className="text-xs text-slate-500 hover:text-brand px-2 py-1 rounded hover:bg-slate-50">
+              {wide ? '收窄' : '加宽'}
+            </button>
+            <button onClick={() => setOpen(false)}
+              className="text-xs text-slate-500 hover:text-brand px-2 py-1 rounded hover:bg-slate-50">
+              收起
+            </button>
+          </div>
+          <div className="flex-1 min-h-0">
+            {sidekick ?? <div className="p-6 text-slate-400 text-sm">AI Sidekick（P4 实现）</div>}
+          </div>
+        </aside>
+      )}
+
+      {!onAgentPage && !open && (
+        <button onClick={() => setOpen(true)}
+          className="fixed bottom-6 right-6 flex items-center gap-2 px-4 py-2.5 rounded-full
+                     bg-brand text-white text-sm shadow-lg hover:opacity-90">
+          <span>AI Sidekick</span>
+          {busy && <span className="w-2 h-2 rounded-full bg-brand animate-pulse ring-2 ring-white" />}
+        </button>
+      )}
     </div>
   )
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { shouldRecordTurn } from './Sidekick'
+import { shouldRecordTurn } from './SidekickProvider'
 
 // 项目没配 jsdom，ask() 本身测不了；但「本轮该不该写进会话历史」这个判定是纯逻辑，
 // 抽出来单独钉住。它守的是切角色竞态：一次问询 6~40 秒，用户中途切角色时，
