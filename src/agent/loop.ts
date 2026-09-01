@@ -59,7 +59,7 @@ export async function runAgent(o: RunAgentOptions): Promise<void> {
   const writeToolNames = new Set(
     toolsFor(o.user.role).filter(t => t.isWrite).map(t => t.name)
   )
-  let executedWrite = false
+  let writeResolved = false
   let nudged = false
   let stepIdx = 0
   o.emit({ type: 'step_start', stepId: plan.steps[0].id })
@@ -92,7 +92,7 @@ export async function runAgent(o: RunAgentOptions): Promise<void> {
       const planHasWriteStep = plan.steps.some(
         s => s.expectedTools?.some(t => writeToolNames.has(t))
       )
-      if (!nudged && !executedWrite && planHasWriteStep) {
+      if (!nudged && !writeResolved && planHasWriteStep) {
         nudged = true
         messages.push({
           role: 'user',
@@ -125,6 +125,8 @@ export async function runAgent(o: RunAgentOptions): Promise<void> {
         o.emit({ type: 'confirm_request', id: call.id, toolName: name, args, summary })
         const approved = await o.requestConfirm(call.id, name, args, summary)
         o.emit({ type: 'confirm_resolved', id: call.id, approved })
+        // 批准或拒绝都算「这一步已有结论」，补推只针对模型压根没调用写工具的情况。
+        writeResolved = true
         if (!approved) {
           const denial = { rejected: true, reason: '用户拒绝了该写操作，请据此调整建议，不要重复尝试。' }
           o.emit({ type: 'tool_result', id: call.id, result: denial, ms: 0 })
@@ -134,7 +136,6 @@ export async function runAgent(o: RunAgentOptions): Promise<void> {
       }
 
       const r = executeTool(name, args, ctx())
-      if (def?.isWrite) executedWrite = true
       o.pushAudit(auditOf(name, args, r, ctx()))
       o.emit({ type: 'tool_result', id: call.id, result: r.result, ms: r.ms })
       messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(r.result) })

@@ -78,7 +78,7 @@
 
 **数据**：全部由 `generateSeed(42)` 运行时确定性生成（mulberry32 伪随机），无数据库、无后端存储。48 客户 / 90 商机 / 60 SKU / 160 销售订单 / 55 采购单 / 120 应收。演示所需的冲突链在随机生成之后由 `applyPlantedScenario()` 硬编码覆盖，由 `seed.test.ts` 的断言钉死。
 
-**测试**：4 个测试文件 37 条用例（`seed` 10 / `rbac` 7 / `risk` 4 / `registry` 16），覆盖埋雷数据一致性、权限双层拦截、字段脱敏与交期风险计算。
+**测试**：9 个测试文件 68 条用例（`seed` 10 / `rbac` 10 / `risk` 4 / `registry` 16 / `llm` 8 / `prompts` 6 / `loop` 8 / `replay` 3 / `sidekick` 3），覆盖埋雷数据一致性、权限双层拦截、字段脱敏、交期风险计算、Agent 执行循环与录播角色门禁。
 
 ---
 
@@ -101,7 +101,7 @@ npm run build && npx wrangler pages dev dist --binding ZHIPU_API_KEY=<your-key>
 其他命令：
 
 ```bash
-npm test             # vitest run，应为 4 files / 37 tests 全绿
+npm test             # vitest run，应为 9 files / 68 tests 全绿
 npm run build        # tsc -b && vite build
 npm run lint         # oxlint
 ```

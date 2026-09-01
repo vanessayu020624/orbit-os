@@ -114,6 +114,26 @@ describe('写入步骤补推（Bug 1b）', () => {
     expect(events.some(e => e.type === 'confirm_request')).toBe(true)
   })
 
+  it('用户拒绝写操作后不再补推（不会弹出第二张确认卡）', async () => {
+    script(
+      WRITE_PLAN,
+      {
+        role: 'assistant', content: null,
+        tool_calls: [{ id: 'c1', type: 'function', function: {
+          name: 'create_purchase_order',
+          arguments: JSON.stringify({ supplierName: '锐驰机电', sku: 'SKU-203', qty: 48, expedited: true }),
+        } }],
+      },
+      textReply('好的，已了解，不再重试。'),
+    )
+    const events: AgentEvent[] = []
+    await run(userNamed('王强'), events, { requestConfirm: async () => false })
+
+    expect(chatMock).toHaveBeenCalledTimes(3)
+    expect(events.filter(e => e.type === 'confirm_request').length).toBe(1)
+    expect(seen.at(-1)!.some(m => m.content?.includes('尚未执行的写入步骤'))).toBe(false)
+  })
+
   it('计划里没有写入步骤时，无 tool_calls 立即收尾（主路径不回归）', async () => {
     script(
       planReply([{ id: 's1', title: '查订单', expectedTools: ['query_sales_orders'] }]),

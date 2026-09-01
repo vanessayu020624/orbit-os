@@ -7,11 +7,11 @@
 
 ```
 提问
- └─ ① Planner    LLM 一次 JSON 调用 → {goal, steps[], needsWrite}   loop.ts:27-42
- └─ ② Executor   function calling 循环，MAX_TURNS = 12              loop.ts:58-125
-      ├─ 每轮：正文正则匹配「需要追加步骤：」→ 动态追加步骤          loop.ts:69-77
-      ├─ 每个 tool_call：写工具 → HITL 拦截 → 批准才 executeTool     loop.ts:99-115
-      └─ 某轮无 tool_calls → 收尾，抽取 [[记录号]] → final           loop.ts:79-88
+ └─ ① Planner    LLM 一次 JSON 调用 → {goal, steps[], needsWrite}   loop.ts:27-43
+ └─ ② Executor   function calling 循环，MAX_TURNS = 12              loop.ts:67-151
+      ├─ 每轮：正文正则匹配「需要追加步骤：」→ 动态追加步骤          loop.ts:78-85
+      ├─ 每个 tool_call：写工具 → HITL 拦截 → 批准才 executeTool     loop.ts:114-142
+      └─ 某轮无 tool_calls → 收尾，抽取 [[记录号]] → final           loop.ts:87-111
 ```
 
 工具 15 个（只读 11 / 写 4），角色 4 个，各角色实际可用工具数：销售代表 9、销售总监 11、供应链主管 8、CEO 11。模型是智谱 **GLM-4.5-Flash**，`temperature 0.2`，经 Cloudflare Pages Function 代理（`functions/api/chat.ts`），API Key 只存在于 Cloudflare 环境变量。
@@ -35,16 +35,16 @@ Planner–Executor 把规划从模型的内部推理里**拽出来变成一个�
 
 - **多一轮 LLM 调用**，而且这一轮阻塞在所有工具执行之前——它加的是首字延迟（TTFT 意义上的「第一个界面元素出现」前的等待），是用户感知最敏感的那一段。
 - **计划可能失真。** Planner 只看到工具的名字和描述（`toolCatalogText(role)`），看不到任何真实数据，所以它列的步骤是「基于常识的猜测」。真实执行完全可能偏离计划——这就是为什么必须做 `plan_amended` 动态追加，否则清单会和实际执行对不上，反而毁掉可信度。
-- **进度映射是近似的。** 这一点必须诚实说明：`loop.ts` 的 `stepIdx` 是**每轮循环推进一格**（`loop.ts:118-124`），而不是根据「这一轮实际调用的工具是否等于该步骤的 `expectedTools`」来判定。一轮里调了三个工具、或者一个步骤跨了两轮，勾选进度就会和真实执行错位。这是我为了 P3 的工期做的简化。要修的话，正确做法是拿 `expectedTools` 与本轮 `tool_calls` 求交集来推进步骤，代价是模型不按计划调工具时步骤会卡住不动，需要额外的兜底规则——**这是个真实的取舍，不是遗漏**。
+- **进度映射是近似的。** 这一点必须诚实说明：`loop.ts` 的 `stepIdx` 是**每轮循环推进一格**（`loop.ts:144-150`），而不是根据「这一轮实际调用的工具是否等于该步骤的 `expectedTools`」来判定。一轮里调了三个工具、或者一个步骤跨了两轮，勾选进度就会和真实执行错位。这是我为了 P3 的工期做的简化。要修的话，正确做法是拿 `expectedTools` 与本轮 `tool_calls` 求交集来推进步骤，代价是模型不按计划调工具时步骤会卡住不动，需要额外的兜底规则——**这是个真实的取舍，不是遗漏**。
 
 ### 实测数据（待补）
 
 | 指标 | 实测值 | 测量方法 |
 |---|---|---|
-| Planner 调用额外延迟 | **待实测** | 在 `loop.ts:27` 的 `chat()` 调用前后 `performance.now()` 打点，剧本 A 连跑 10 次取中位数与 P90 |
+| Planner 调用额外延迟 | **待实测** | 在 `loop.ts:29` 的 `chat()` 调用前后 `performance.now()` 打点，剧本 A 连跑 10 次取中位数与 P90 |
 | 首个界面元素出现耗时（Planner 方案） | **待实测** | 从 `ask()` 进入到 `emit({type:'plan'})` 的墙钟时间，10 次中位数 |
 | 首个界面元素出现耗时（纯 ReAct 对照） | **待实测** | 临时跳过 Planner 阶段直接进 Executor，测到第一个 `tool_call` 事件的时间，同样 10 次 |
-| Planner 输出 JSON 解析失败率 | **待实测** | 统计 `extractJson()` 抛异常的次数 ÷ 总调用数（`llm.ts:46` 已为 GLM 偶尔套 markdown 围栏做了兜底，需要知道这个兜底被触发的频率） |
+| Planner 输出 JSON 解析失败率 | **待实测** | 统计 `extractJson()` 抛异常的次数 ÷ 总调用数（`llm.ts:87` 的 `extractJson()` 已为 GLM 偶尔套 markdown 围栏做了兜底，需要知道这个兜底被触发的频率） |
 
 上表第二、三行的**差值**才是这个设计的真实代价，单独看第一行会高估——因为纯 ReAct 的第一轮调用同样要等模型输出，只是输出的是 tool_call 而不是计划。
 
@@ -127,7 +127,7 @@ for (const line of o.items) {
 除了这个核心错误，拆开还要付：
 
 - **轮数**：从 1 轮变成至少 3 轮（查订单 → 查库存 → 查在途采购单），加上模型的中间推理输出，`MAX_TURNS = 12` 的预算被吃掉四分之一。
-- **中间态污染上下文**：`query_pending_orders` 返回 7 张订单的完整 JSON，`check_inventory` 返回若干 SKU 的完整 JSON，这些原文都会被 `messages.push()` 进对话历史（`loop.ts:115`）并在后续每一轮重复发送。合并成一个工具，只有最终的 `risks` 数组进上下文。
+- **中间态污染上下文**：`query_pending_orders` 返回 7 张订单的完整 JSON，`check_inventory` 返回若干 SKU 的完整 JSON，这些原文都会被 `messages.push()` 进对话历史（`loop.ts:141`）并在后续每一轮重复发送。合并成一个工具，只有最终的 `risks` 数组进上下文。
 - **`incomingEta` 这条链会断**：风险等级依赖「该 SKU 最早的在途/已下单采购单 ETA」与承诺交期的日期差（`risk.ts:39-53`）。拆开之后 LLM 要自己筛 `status === '在途' || '已下单'`、自己匹配 `skuId`、自己取最小 ETA、自己算日期差、自己分级。这是五个可以各自出错的环节，每一个都是「看起来算对了」的那种错。
 
 所以边界画在这里：**LLM 决定「现在要不要测算交期风险、测算哪些订单」，代码决定「怎么算」。** 前者是判断，后者是规则。判断交给模型，规则交给代码。
@@ -224,7 +224,7 @@ deniedCount = requested.length - allowed.length
 
 **这类幻觉长什么样**：Agent 说「SKU-203 目前库存约 50 台，缺口大约 40 台」。数字量级对、听起来专业、完全是编的。它最危险的地方在于**看起来比正确答案更像正确答案**——真实答案往往是 42 这种不圆整的数。
 
-**怎么拦**：Executor 的 system prompt 前两条是硬约束（`prompts.ts:40-42`）：
+**怎么拦**：Executor 的 system prompt 前两条是硬约束（`prompts.ts:56-57`）：
 
 ```
 1. 【禁止编造】回答中出现的每一个数字、单号、客户名、日期，都必须来自工具返回结果。
@@ -232,7 +232,7 @@ deniedCount = requested.length - allowed.length
 2. 【必须溯源】结论中引用具体记录时用双方括号标注，例如 [[SO-2026-0412]]、[[SKU-203]]、[[PO-2026-0117]]。
 ```
 
-`loop.ts:85` 用正则 `/\[\[([^\]]+)\]\]/g` 抽出所有标记，`RefChip.tsx` 的 `renderWithRefs()` 把它们渲染成可点击的蓝色 chip，按前缀路由到对应列表页（`SO-` → `/orders`，`SKU-` → `/inventory`，`PO-` → `/purchases`…）。
+`loop.ts:109` 用正则 `/\[\[([^\]]+)\]\]/g` 抽出所有标记，`RefChip.tsx` 的 `renderWithRefs()` 把它们渲染成可点击的蓝色 chip，按前缀路由到对应列表页（`SO-` → `/orders`，`SKU-` → `/inventory`，`PO-` → `/purchases`…）。
 
 **为什么这个设计有用**：它把「验证成本」压到了一次点击。面试官或用户不需要相信 Agent，点一下 chip 就能看到原始记录。**可验证性比准确性更重要**——一个 95% 准确但无法验证的系统，和一个 90% 准确但每条都能一键核对的系统，后者在企业里能用，前者不能。
 
@@ -242,7 +242,7 @@ deniedCount = requested.length - allowed.length
 
 **这类幻觉长什么样**：Agent 的分析全对，但行动错了——把 48 台写成 480 台，把供应商选成了没有该 SKU 供应能力的那家，或者在用户只是问「有没有风险」的时候直接把采购单下了。这一类的特点是**不可逆**：查错了刷新一下就好，写错了要走退单流程。
 
-**怎么拦**：`loop.ts:99-110` 在每个 tool_call 执行前检查 `def?.isWrite`，命中就把执行挂起在一个 Promise 上，等 UI 返回用户的决定。4 个写工具（`create_purchase_order` / `update_order_promise_date` / `reserve_inventory` / `create_followup_task`）无一例外。测试 `CEO 拿不到任何写工具` 与 `共 15 个工具，其中 4 个写工具` 把这个集合钉死，新增写工具时如果忘了声明 `isWrite: true`，测试会红。
+**怎么拦**：`loop.ts:123-136` 在每个 tool_call 执行前检查 `def?.isWrite`，命中就把执行挂起在一个 Promise 上，等 UI 返回用户的决定。4 个写工具（`create_purchase_order` / `update_order_promise_date` / `reserve_inventory` / `create_followup_task`）无一例外。测试 `CEO 拿不到任何写工具` 与 `共 15 个工具，其中 4 个写工具` 把这个集合钉死，新增写工具时如果忘了声明 `isWrite: true`，测试会红。
 
 详细的产品设计见 §5。
 
@@ -333,11 +333,11 @@ confirmSummary: (a, ctx) => {
 
 同样的道理体现在 `update_order_promise_date` 的摘要上（`write.ts:19-23`）——它会**先查出旧交期**，写成「将把 SO-2026-0428 承诺交期从 2026-09-10 改为 2026-09-16，原因：…」。给对比而不只给目标值，因为人判断「这个改动合不合理」靠的是变化量，不是终值。
 
-`loop.ts:100` 还有一个兜底：`def.confirmSummary?.(args, ctx()) ?? '将执行写操作 ${name}'`。新增写工具时忘了写 `confirmSummary`，用户至少会看到一张丑陋但存在的卡片，而不是静默执行——**降级要降到显眼，不要降到静默**。
+`loop.ts:124` 还有一个兜底：`def.confirmSummary?.(args, ctx()) ?? '将执行写操作 ${name}'`。新增写工具时忘了写 `confirmSummary`，用户至少会看到一张丑陋但存在的卡片，而不是静默执行——**降级要降到显眼，不要降到静默**。
 
 ### 用户拒绝后，为什么把 rejected 结果喂回模型
 
-`loop.ts:104-109`：
+`loop.ts:130-135`：
 
 ```ts
 if (!approved) {
@@ -358,7 +358,7 @@ if (!approved) {
 
 **拒绝率是产品质量信号，不是安全指标。** 我在 PRD §6 里把「人工确认拒绝率」列为核心指标，看的方向和直觉相反：拒绝率高**不**说明安全机制在有效工作，说明 Agent 的建议质量差——它在提用户不想要的方案。理想状态是拒绝率低而确认卡的**停留时长**不低（用户认真看了，然后同意）。
 
-**当前实现的缺口，必须记下来**：`o.pushAudit(auditOf(...))` 只在 `executeTool` 之后调用（`loop.ts:113`），拒绝分支 `continue` 掉了，**所以被拒绝的写操作不会进 `auditLog`**。而拒绝率恰恰是我列为核心指标的那个数——按现在的实现它算不出来。修法很简单（在拒绝分支补一条 `ok: false` 的审计），但我没有在这一期动代码。这是一个真实的产品指标与实现之间的脱节，我宁可写在文档里也不假装它不存在。
+**当前实现的缺口，必须记下来**：`o.pushAudit(auditOf(...))` 只在 `executeTool` 之后调用（`loop.ts:139`），拒绝分支 `continue` 掉了，**所以被拒绝的写操作不会进 `auditLog`**。而拒绝率恰恰是我列为核心指标的那个数——按现在的实现它算不出来。修法很简单（在拒绝分支补一条 `ok: false` 的审计），但我没有在这一期动代码。这是一个真实的产品指标与实现之间的脱节，我宁可写在文档里也不假装它不存在。
 
 ---
 
@@ -366,9 +366,9 @@ if (!approved) {
 
 ### 结构分析（不依赖实测就能推出来的部分）
 
-一次会话的 LLM 调用次数 = **1（Planner）+ N（Executor 轮数）**，N 的上界是 `MAX_TURNS = 12`，实际取决于模型几轮能收敛。单次请求超时 45 秒（`llm.ts:27`）。
+一次会话的 LLM 调用次数 = **1（Planner）+ N（Executor 轮数）**，N 的上界是 `MAX_TURNS = 12`，实际取决于模型几轮能收敛。单次请求超时 45 秒（`llm.ts:46`）。
 
-真正需要警惕的是 **token 消耗随轮数超线性增长**。原因在 `loop.ts:115`：
+真正需要警惕的是 **token 消耗随轮数超线性增长**。原因在 `loop.ts:141`：
 
 ```ts
 messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(r.result) })
@@ -388,7 +388,8 @@ messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(r.r
 
 | 指标 | 实测值 | 测量方法 |
 |---|---|---|
-| 剧本 A 单次会话总 token（prompt / completion / 合计） | **待实测** | 智谱返回体的 `usage` 字段（`prompt_tokens` / `completion_tokens`）在 `llm.ts` 的 `chat()` 里逐次累加，会话结束打印总和。连跑 5 次取中位数 |
+| thinking 关闭前后对比（单次 `chat()` 调用） | **已实测**：耗时 **26s → 6.4s**，输出 token **489 → 34** | 同一 prompt 分别带/不带 `thinking:{"type":"disabled"}` 各跑一次；`llm.ts` 现在默认带上该参数。据此估算剧本 A（5–7 次调用）总耗时约 **38s** |
+| 剧本 A 单次会话总 token（prompt / completion / 合计） | 界面底部实时显示，随问题复杂度浮动 | 智谱返回体的 `usage` 字段（`prompt_tokens` / `completion_tokens`）由 `llm.ts` 的 `chat()` 逐次累加进 `usageLog`，`sumUsage()` 汇总后显示在 Sidekick 底部；每轮 `resetUsage()` 清零。**尚未跑完整剧本量做统计**，所以这里不填一个具体总数——不同问题的工具调用轮数不同，token 总量本身就该是随问题浮动的，不是一个常量 |
 | 剧本 A 单次会话 LLM 调用次数 | **待实测** | 同上，累计 `chat()` 调用次数；同时记录 Executor 实际用掉的轮数 N |
 | 剧本 A 单次会话工具调用次数 | **待实测** | 统计 `tool_call` 事件数（`auditLog.length` 可直接读，注意被拒绝的写操作当前不进审计，见 §5） |
 | 剧本 A 端到端墙钟耗时 | **待实测** | 从 `ask()` 进入到 `final` 事件的时间差，**扣除人工确认的停留时间**（否则测的是人的反应速度） |
@@ -396,11 +397,19 @@ messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(r.r
 | 单次工具执行耗时 | **已可读，无需外网** | `executeTool` 已经返回 `ms` 并显示在工具卡右上角；本地纯计算，实测在个位数毫秒量级，**相对 LLM 调用可忽略——延迟预算 99% 花在模型上** |
 | 剧本 A 单次会话成本 | **待实测** | `(prompt_tokens × 输入单价 + completion_tokens × 输出单价)`，单价取智谱开放平台当期公开报价 |
 
+### token 计量为什么直接显示给用户
+
+Sidekick 底部那行「本次问询消耗 N tokens」不是调试信息，是故意做给用户看的。Agent 产品的成本模型和传统功能不一样：传统功能的边际成本约等于零，Agent 的每一次回答都在实打实地烧钱，而且烧多少取决于问题的复杂度、轮数、上下文长度——用户完全无法从界面猜到。把这个数字藏起来，团队自己也会在「这功能到底贵不贵」上失去感觉，直到账单出来才后知后觉。把成本可见化摆在界面上，是把「这次问询值不值」的判断权交还给做决策的人，这是 PM 该做的默认设计，不是事后补的监控。
+
+### 为什么只带最近 2 轮、截断到 600 字
+
+`history.current` 只保留最近 2 轮问答（`Sidekick.tsx`），`historyBlock()` 把每轮答案截到 600 字（`prompts.ts:12`）再塞进 prompt。不是全量历史，代价是两条：一是成本，每多带一轮历史就要在 Planner 和 Executor 两次调用里各重发一次，轮数一涨 token 账单就跟着涨；二是注意力稀释，历史堆得越长，模型对当前问题的关注就越弱，反而降低追问的准确率。切换角色时历史直接清空，是权限边界决定的——上一个角色的问答里可能带着这个角色看不到的数据，带进新上下文等于泄露。
+
 ### 免费额度下的成本
 
 GLM-4.5-Flash 是智谱的免费模型，在演示规模下（一天几十次会话）成本为零。这是选它的**唯一**理由：面试演示不能因为额度耗尽而翻车，也不该为了一个 demo 挂账。
 
-它的代价同样要说清楚：Flash 级模型的 function calling 稳定性弱于旗舰模型。代码里有两处补丁就是为它打的——`llm.ts:46` 的 `extractJson()` 要从可能带 markdown 围栏的文本里抠 JSON（注释原话「GLM 偶尔不听话」），以及 `loop.ts:69` 用**正文正则**而不是结构化字段来识别动态追加步骤。这两处都是在迁就模型的不稳定，换成更强的模型可以删掉。
+它的代价同样要说清楚：Flash 级模型的 function calling 稳定性弱于旗舰模型。代码里有两处补丁就是为它打的——`llm.ts:87` 的 `extractJson()` 要从可能带 markdown 围栏的文本里抠 JSON（注释原话「GLM 偶尔不听话」），以及 `loop.ts:78` 用**正文正则**而不是结构化字段来识别动态追加步骤。这两处都是在迁就模型的不稳定，换成更强的模型可以删掉。
 
 ### 换成 GPT-4 级模型会怎样
 

@@ -138,7 +138,7 @@ export function Sidekick() {
         ? '模型并发已满（1302），以下为录播内容'
         : '模型连接失败，以下为录播内容' }])
       if (scene) {
-        await runReplay(scene, emit, (id) => confirmFn(id))
+        await runReplay(scene, askUser, emit, (id) => confirmFn(id))
       } else {
         setItems(p => [...p, { k: 'error', text: limited
           ? '智谱免费档并发上限为 2 路，当前已占满（错误码 1302），且这个问题不在录播的两个场景内。稍等几秒重试即可。'

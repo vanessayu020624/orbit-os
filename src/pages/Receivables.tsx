@@ -2,11 +2,11 @@ import { useStore } from '../lib/store'
 import { DataTable } from '../components/DataTable'
 import { StatusChip, AR_TONE } from '../components/StatusChip'
 import { money, daysFromToday } from '../lib/format'
+import { scopeReceivables } from '../lib/rbac'
 
 export default function Receivables() {
   const { db, currentUser } = useStore()
-  const canView = currentUser.role === 'sales_director' || currentUser.role === 'ceo'
-  const rows = canView ? db.receivables : []
+  const rows = scopeReceivables(db, currentUser)
 
   return (
     <div className="space-y-4">

@@ -1,5 +1,5 @@
 import type { DbSnapshot, User } from '../../lib/types'
-import { scopeOrders } from '../../lib/rbac'
+import { scopeOrders, scopeReceivables } from '../../lib/rbac'
 import { countDeliveryRiskOrders } from '../../lib/risk'
 import { money } from '../../lib/format'
 
@@ -16,7 +16,7 @@ function computeKpis(db: DbSnapshot, user: User): Kpi[] {
   const riskOrders = countDeliveryRiskOrders(db, user)
 
   const canSeeAr = user.role === 'sales_director' || user.role === 'ceo'
-  const overdue = db.receivables.filter(r => r.status === '已逾期')
+  const overdue = scopeReceivables(db, user).filter(r => r.status === '已逾期')
   const overdueAmt = overdue.reduce((s, r) => s + r.amount - r.paidAmount, 0)
 
   return [

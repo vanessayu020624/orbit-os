@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { generateSeed } from './seed'
-import { scopeCustomers, scopeOrders, scopeOpportunities, maskOrderForRole } from './rbac'
+import { scopeCustomers, scopeOrders, scopeOpportunities, scopeReceivables, maskOrderForRole } from './rbac'
 
 const db = generateSeed(42)
 const u = (n: string) => db.users.find(x => x.name === n)!
@@ -26,6 +26,22 @@ describe('数据级权限', () => {
     const r = scopeOrders(db, u('李娜'))
     expect(r.length).toBeGreaterThan(0)
     expect(r.length).toBeLessThan(db.orders.length)
+  })
+})
+
+describe('应收账款团队隔离', () => {
+  it('销售总监拿到的应收，其 customerId 全部落在 scopeCustomers 的结果里', () => {
+    const custIds = new Set(scopeCustomers(db, u('李娜')).map(c => c.id))
+    const r = scopeReceivables(db, u('李娜'))
+    expect(r.length).toBeGreaterThan(0)
+    expect(r.every(x => custIds.has(x.customerId))).toBe(true)
+  })
+  it('销售代表与供应链拿到空数组', () => {
+    expect(scopeReceivables(db, u('张伟')).length).toBe(0)
+    expect(scopeReceivables(db, u('王强')).length).toBe(0)
+  })
+  it('CEO 拿到全部 120 条', () => {
+    expect(scopeReceivables(db, u('陈立')).length).toBe(120)
   })
 })
 

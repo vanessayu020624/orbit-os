@@ -1,5 +1,6 @@
-import type { AgentEvent, PurchaseOrder } from '../lib/types'
+import type { AgentEvent, PurchaseOrder, Role, User } from '../lib/types'
 import { useStore } from '../lib/store'
+import { ROLE_META } from '../lib/rbac'
 
 // 断网兜底：/api/chat 不可达时的两条剧本，事件序列与措辞按真实 GLM 输出的格式手写，
 // tool_result 的数字直接取自 generateSeed(42) 的确定性结果（见 P4 报告的验证脚本），
@@ -139,13 +140,30 @@ export const REPLAY: Record<string, { delay: number; event: AgentEvent }[]> = {
   permission: PERMISSION_SCRIPT,
 }
 
+// 每段录播都是以某个角色的视角录的：delivery 以供应链主管身份创建采购单，
+// permission 是销售代表口吻。角色对不上就不能演——否则 CEO 会看到销售代表的
+// 回答，还能批准一张它本来无权发起的采购单。
+export const REPLAY_ROLE: Record<'delivery' | 'permission', Role> = {
+  delivery: 'supply_chain',
+  permission: 'sales_rep',
+}
+
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms))
 
 export async function runReplay(
   scenario: 'delivery' | 'permission',
+  user: User,
   emit: (e: AgentEvent) => void,
   requestConfirm: (id: string, n: string, a: unknown, s: string) => Promise<boolean>,
 ): Promise<void> {
+  const need = REPLAY_ROLE[scenario]
+  if (user.role !== need) {
+    emit({ type: 'error', message:
+      `这段录播是以「${ROLE_META[need].label}」的视角录制的，当前角色是「${ROLE_META[user.role].label}」。` +
+      `不同角色能看到的数据和能执行的写操作都不一样，直接播放会给出与权限不符的内容，所以这里不演。` +
+      `请切到「${ROLE_META[need].label}」再问一次，或等几秒重试实时模型。` })
+    return
+  }
   const script = REPLAY[scenario]
   for (const { delay, event } of script) {
     await sleep(delay)

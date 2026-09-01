@@ -1,6 +1,6 @@
 import type { ToolDef } from '../../lib/types'
 import { TODAY } from '../../lib/types'
-import { scopeCustomers, scopeOpportunities, scopeOrders } from '../../lib/rbac'
+import { scopeCustomers, scopeOpportunities, scopeOrders, scopeReceivables } from '../../lib/rbac'
 import { simulateDeliveryRisk } from '../../lib/risk'
 import { daysFromToday } from '../../lib/format'
 
@@ -19,7 +19,7 @@ export const analyticsTools: ToolDef[] = [
       },
     },
     run: (a, ctx) => {
-      let rows = ctx.db.receivables
+      let rows = scopeReceivables(ctx.db, ctx.user)
       if (a.status) rows = rows.filter(r => r.status === a.status)
       const withDays = rows.map(r => ({ r, overdueDays: Math.max(0, -daysFromToday(r.dueDate)) }))
       const filtered = a.overdueDaysMin != null

@@ -1,4 +1,4 @@
-import type { Role, User, Customer, SalesOrder, Opportunity, DbSnapshot } from './types'
+import type { Role, User, Customer, SalesOrder, Opportunity, Receivable, DbSnapshot } from './types'
 
 export interface RoleMeta { key: Role; label: string; demoUserId: string; description: string }
 
@@ -44,6 +44,17 @@ export function scopeOpportunities(db: DbSnapshot, user: User): Opportunity[] {
                              return db.opportunities.filter(o => ids.includes(o.ownerId)) }
     case 'ceo':            return db.opportunities
     case 'supply_chain':   return []
+  }
+}
+
+// 应收没有 ownerId，按「所属客户归谁」过滤，口径与 scopeCustomers 一致。
+export function scopeReceivables(db: DbSnapshot, user: User): Receivable[] {
+  switch (user.role) {
+    case 'ceo':            return db.receivables
+    case 'sales_director': { const ids = new Set(scopeCustomers(db, user).map(c => c.id))
+                             return db.receivables.filter(r => ids.has(r.customerId)) }
+    case 'sales_rep':
+    case 'supply_chain':   return []          // 无应收权限，见 PRD 权限矩阵
   }
 }
 
