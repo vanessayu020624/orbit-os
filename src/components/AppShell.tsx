@@ -1,18 +1,31 @@
 import { NavLink, useLocation } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { useStore } from '../lib/store'
-import { ROLE_META } from '../lib/rbac'
+import { ROLE_META, isEntityDenied } from '../lib/rbac'
+import type { ScopedEntity } from '../lib/rbac'
 import { RoleSwitcher } from './RoleSwitcher'
 import { useSidekick } from '../sidekick/SidekickProvider'
 
-const NAV = [
-  { to: '/',             label: '仪表盘' },
-  { to: '/customers',    label: '客户' },
-  { to: '/opportunities',label: '商机' },
-  { to: '/orders',       label: '订单' },
-  { to: '/inventory',    label: '库存' },
-  { to: '/purchases',    label: '采购' },
-  { to: '/receivables',  label: '应收' },
+interface NavItem { to: string; label: string; entity: ScopedEntity | null }
+interface NavGroup { title: string | null; items: NavItem[] }
+
+const NAV_GROUPS: NavGroup[] = [
+  { title: null, items: [
+    { to: '/',              label: '仪表盘', entity: null },
+    { to: '/agent',         label: 'AI 助手', entity: null },
+  ] },
+  { title: '销售', items: [
+    { to: '/customers',     label: '客户',   entity: 'customers' },
+    { to: '/opportunities', label: '商机',   entity: 'opportunities' },
+    { to: '/orders',        label: '订单',   entity: 'orders' },
+  ] },
+  { title: '供应链', items: [
+    { to: '/inventory',     label: '库存',   entity: null },
+    { to: '/purchases',     label: '采购',   entity: 'purchases' },
+  ] },
+  { title: '财务', items: [
+    { to: '/receivables',   label: '应收',   entity: 'receivables' },
+  ] },
 ]
 
 export function AppShell({ children, sidekick }: { children: ReactNode; sidekick?: ReactNode }) {
@@ -29,12 +42,31 @@ export function AppShell({ children, sidekick }: { children: ReactNode; sidekick
           <div className="text-xs text-slate-400 mt-0.5">擎源工业设备</div>
         </div>
         <div className="p-2 space-y-0.5 flex-1">
-          {NAV.map(n => (
-            <NavLink key={n.to} to={n.to} end={n.to === '/'}
-              className={({ isActive }) => `block px-3 py-2 rounded-md text-sm ${
-                isActive ? 'bg-brand/10 text-brand font-medium' : 'text-slate-600 hover:bg-slate-50'}`}>
-              {n.label}
-            </NavLink>
+          {NAV_GROUPS.map(g => (
+            <div key={g.title ?? '__root'}>
+              {g.title && (
+                <div className="px-3 pt-3 pb-1 text-[10px] font-medium text-slate-400 tracking-wide">
+                  {g.title}
+                </div>
+              )}
+              {g.items.map(n => {
+                const denied = n.entity !== null && isEntityDenied(currentUser.role, n.entity)
+                return (
+                  <NavLink key={n.to} to={n.to} end={n.to === '/'}
+                    title={denied ? `${ROLE_META[currentUser.role].label}无此权限` : undefined}
+                    className={({ isActive }) => `flex items-center justify-between gap-1.5 px-3 py-2 rounded-md text-sm ${
+                      isActive ? 'bg-brand/10 text-brand font-medium'
+                        : denied ? 'text-slate-300 hover:bg-slate-50' : 'text-slate-600 hover:bg-slate-50'}`}>
+                    <span>{n.label}</span>
+                    {denied && (
+                      <svg viewBox="0 0 16 16" className="w-3 h-3 shrink-0" fill="currentColor" aria-hidden="true">
+                        <path d="M5 7V5a3 3 0 1 1 6 0v2h.5A1.5 1.5 0 0 1 13 8.5v4A1.5 1.5 0 0 1 11.5 14h-7A1.5 1.5 0 0 1 3 12.5v-4A1.5 1.5 0 0 1 4.5 7H5Zm1.2 0h3.6V5a1.8 1.8 0 1 0-3.6 0v2Z" />
+                      </svg>
+                    )}
+                  </NavLink>
+                )
+              })}
+            </div>
           ))}
         </div>
         <div className="p-3 border-t text-xs text-slate-400 leading-relaxed">

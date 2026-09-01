@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { generateSeed } from './seed'
 import {
-  scopeCustomers, scopeOrders, scopeOpportunities, scopeReceivables, maskOrderForRole,
-  canSeeCustomerFinancials, overrideNoticeFor, scopeSummary, boundaryReason,
+  scopeCustomers, scopeOrders, scopeOpportunities, scopeReceivables, scopePurchaseOrders,
+  maskOrderForRole, canSeeCustomerFinancials, overrideNoticeFor, scopeSummary, boundaryReason,
+  isEntityDenied,
 } from './rbac'
 import { scopeHeaderText, scopeEmptyText } from './scopeText'
 import { toolsFor, executeTool } from '../agent/registry'
@@ -118,6 +119,25 @@ describe('显式边界：scopeSummary', () => {
     const withHidden = boundaryReason(
       { visible: 0, total: 120, hidden: 120, basis: '你本人名下', denied: false, label: '应收' }, 'receivables')
     expect(withHidden).toContain('全公司另有 120 条，超出你的查看范围')
+  })
+  it('scopePurchaseOrders：供应链与 CEO 拿到全部采购单，销售代表与销售总监拿到 0 条', () => {
+    expect(scopePurchaseOrders(db, u('王强')).length).toBe(db.purchaseOrders.length)
+    expect(scopePurchaseOrders(db, u('陈立')).length).toBe(db.purchaseOrders.length)
+    expect(scopePurchaseOrders(db, u('张伟')).length).toBe(0)
+    expect(scopePurchaseOrders(db, u('李娜')).length).toBe(0)
+  })
+  it('isEntityDenied：销售代表与销售总监对采购单整类无权，供应链与 CEO 有权', () => {
+    expect(isEntityDenied('sales_rep', 'purchases')).toBe(true)
+    expect(isEntityDenied('sales_director', 'purchases')).toBe(true)
+    expect(isEntityDenied('supply_chain', 'purchases')).toBe(false)
+    expect(isEntityDenied('ceo', 'purchases')).toBe(false)
+  })
+  it('isEntityDenied：供应链看订单不是整类无权（只是金额脱敏）', () => {
+    expect(isEntityDenied('supply_chain', 'orders')).toBe(false)
+  })
+  it('张伟（销售代表）看采购的表头文案', () => {
+    const s = scopeSummary(db, u('张伟'), 'purchases')
+    expect(scopeHeaderText(s)).toBe(`你没有查看采购单的权限 · 全公司共 ${db.purchaseOrders.length} 条`)
   })
 })
 

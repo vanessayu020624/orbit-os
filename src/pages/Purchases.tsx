@@ -2,21 +2,23 @@ import { useStore } from '../lib/store'
 import { DataTable } from '../components/DataTable'
 import { StatusChip, PO_TONE } from '../components/StatusChip'
 import { money } from '../lib/format'
+import { scopePurchaseOrders, scopeSummary } from '../lib/rbac'
+import { scopeHeaderText, scopeEmptyText } from '../lib/scopeText'
 
 export default function Purchases() {
   const { db, currentUser } = useStore()
-  const canView = currentUser.role === 'supply_chain' || currentUser.role === 'ceo'
-  const rows = canView ? db.purchaseOrders : []
+  const rows = scopePurchaseOrders(db, currentUser)
+  const scope = scopeSummary(db, currentUser, 'purchases')
 
   return (
     <div className="space-y-4">
       <div className="flex items-baseline gap-3">
         <h1 className="text-xl font-semibold">采购</h1>
-        <span className="text-sm text-slate-400">{rows.length} 条（已按当前角色权限过滤）</span>
+        <span className="text-sm text-slate-400">{scopeHeaderText(scope)}</span>
       </div>
       <DataTable
         rows={rows}
-        empty="当前角色无权访问采购数据"
+        empty={scopeEmptyText(scope)}
         columns={[
           { key: 'poNo', title: '采购单号', width: '140px' },
           { key: 'supplier', title: '供应商', render: (r) =>

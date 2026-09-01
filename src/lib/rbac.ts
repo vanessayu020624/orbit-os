@@ -1,4 +1,4 @@
-import type { Role, User, Customer, SalesOrder, Opportunity, Receivable, DbSnapshot } from './types'
+import type { Role, User, Customer, SalesOrder, Opportunity, Receivable, PurchaseOrder, DbSnapshot } from './types'
 
 export interface RoleMeta { key: Role; label: string; demoUserId: string; description: string }
 
@@ -63,6 +63,16 @@ export function scopeReceivables(db: DbSnapshot, user: User): Receivable[] {
   }
 }
 
+// 采购单没有归属人，是全局供应链数据；权限是「整类给或整类不给」，见 PRD 权限矩阵。
+export function scopePurchaseOrders(db: DbSnapshot, user: User): PurchaseOrder[] {
+  switch (user.role) {
+    case 'supply_chain':
+    case 'ceo':            return db.purchaseOrders
+    case 'sales_rep':
+    case 'sales_director': return []
+  }
+}
+
 const MASK = '***'
 
 /** 供应链主管可见订单的 SKU 与交期，但看不到任何金额。 */
@@ -91,7 +101,7 @@ export function overrideNoticeFor(toolName: string, role: Role): string | null {
 
 // ---- 决定 3：过滤必须自报边界 ----
 
-export type ScopedEntity = 'customers' | 'opportunities' | 'orders' | 'receivables'
+export type ScopedEntity = 'customers' | 'opportunities' | 'orders' | 'receivables' | 'purchases'
 
 /**
  * denied 与 hidden>0 是两件事：hidden 表示「有范围，范围外还有一些」，
@@ -103,7 +113,7 @@ export interface ScopeSummary {
 }
 
 const ENTITY_LABEL: Record<ScopedEntity, string> = {
-  customers: '客户', opportunities: '商机', orders: '订单', receivables: '应收',
+  customers: '客户', opportunities: '商机', orders: '订单', receivables: '应收', purchases: '采购单',
 }
 
 /**
@@ -114,6 +124,8 @@ const DENIED_PAIRS: ReadonlySet<string> = new Set([
   'supply_chain:opportunities',
   'supply_chain:receivables',
   'sales_rep:receivables',
+  'sales_rep:purchases',
+  'sales_director:purchases',
 ])
 
 function deniedFor(role: Role, entity: ScopedEntity): boolean {
@@ -134,6 +146,7 @@ function scopedCount(db: DbSnapshot, user: User, entity: ScopedEntity): number {
     case 'orders':        return scopeOrders(db, user).length
     case 'opportunities': return scopeOpportunities(db, user).length
     case 'receivables':   return scopeReceivables(db, user).length
+    case 'purchases':     return scopePurchaseOrders(db, user).length
   }
 }
 
@@ -143,6 +156,7 @@ function totalCount(db: DbSnapshot, entity: ScopedEntity): number {
     case 'orders':        return db.orders.length
     case 'opportunities': return db.opportunities.length
     case 'receivables':   return db.receivables.length
+    case 'purchases':     return db.purchaseOrders.length
   }
 }
 
@@ -162,6 +176,11 @@ export function scopeSummary(db: DbSnapshot, user: User, entity: ScopedEntity): 
  * 受限读工具在按查询条件过滤后仍是空结果时用：把权限边界写进 reason，
  * 避免模型把「查询条件下没有」读成「全公司都没有」。
  */
+/** 该角色对这类数据是否整类无权。导航用它决定是否置灰加锁。 */
+export function isEntityDenied(role: Role, entity: ScopedEntity): boolean {
+  return deniedFor(role, entity)
+}
+
 export function boundaryReason(s: ScopeSummary, entity: ScopedEntity): string {
   const label = ENTITY_LABEL[entity]
   if (s.denied) return `你没有查看${label}的权限。全公司共 ${s.total} 条，均超出你的查看范围。`
