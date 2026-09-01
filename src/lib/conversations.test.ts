@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   titleFor, newConversation, sanitizeItems,
   readConversations, writeConversations, MAX_CONVERSATIONS,
+  activeFor, archivedFor, otherRoleCount, pruneConversations,
+  MAX_ACTIVE_PER_USER, MAX_ARCHIVED_PER_USER,
   type Conversation,
 } from './conversations'
 import type { Item } from '../sidekick/SidekickProvider'
@@ -125,5 +127,89 @@ describe('往返一致性', () => {
     const store = fakeStore()
     writeConversations(cs, store)
     expect(readConversations(store)).toEqual(cs)
+  })
+})
+
+describe('activeFor', () => {
+  it('只返回指定 userId 的、且 archived 不为真的，保持传入顺序', () => {
+    const cs: Conversation[] = [
+      newConversation('conv-1', 'U-001', 1000),
+      { ...newConversation('conv-2', 'U-001', 2000), archived: true },
+      newConversation('conv-3', 'U-002', 3000),
+      newConversation('conv-4', 'U-001', 4000),
+    ]
+    expect(activeFor(cs, 'U-001').map(c => c.id)).toEqual(['conv-1', 'conv-4'])
+  })
+  it('没有 archived 字段的老数据必须被当成未归档返回', () => {
+    const old = { id: 'conv-1', title: 'x', userId: 'U-001', createdAt: 1000, items: [], history: [] } as Conversation
+    expect(activeFor([old], 'U-001')).toEqual([old])
+  })
+})
+
+describe('archivedFor', () => {
+  it('只返回指定 userId 的 archived === true 的', () => {
+    const cs: Conversation[] = [
+      newConversation('conv-1', 'U-001', 1000),
+      { ...newConversation('conv-2', 'U-001', 2000), archived: true },
+      { ...newConversation('conv-3', 'U-002', 3000), archived: true },
+    ]
+    expect(archivedFor(cs, 'U-001').map(c => c.id)).toEqual(['conv-2'])
+  })
+})
+
+describe('otherRoleCount', () => {
+  it('统计不属于该 userId 的条数，归档的也计入', () => {
+    const cs: Conversation[] = [
+      newConversation('conv-1', 'U-001', 1000),
+      newConversation('conv-2', 'U-002', 2000),
+      { ...newConversation('conv-3', 'U-002', 3000), archived: true },
+    ]
+    expect(otherRoleCount(cs, 'U-001')).toBe(2)
+  })
+})
+
+describe('pruneConversations', () => {
+  it('单个角色 25 条未归档 → 留 20 条，丢掉数组末尾（最旧）的 5 条', () => {
+    const cs = Array.from({ length: 25 }, (_, i) => newConversation(`conv-${i}`, 'U-001', i))
+    const result = pruneConversations(cs)
+    expect(result.length).toBe(MAX_ACTIVE_PER_USER)
+    expect(result.map(c => c.id)).toEqual(cs.slice(0, 20).map(c => c.id))
+  })
+  it('两个角色各 25 条未归档 → 各留 20 条，共 40 条', () => {
+    const a = Array.from({ length: 25 }, (_, i) => newConversation(`a-${i}`, 'U-001', i))
+    const b = Array.from({ length: 25 }, (_, i) => newConversation(`b-${i}`, 'U-002', i))
+    const result = pruneConversations([...a, ...b])
+    expect(result.length).toBe(40)
+    expect(result.filter(c => c.userId === 'U-001').length).toBe(20)
+    expect(result.filter(c => c.userId === 'U-002').length).toBe(20)
+  })
+  it('归档的不占未归档名额：某角色 20 条未归档 + 5 条归档 → 25 条全留', () => {
+    const active = Array.from({ length: 20 }, (_, i) => newConversation(`act-${i}`, 'U-001', i))
+    const archived = Array.from({ length: 5 }, (_, i) => ({ ...newConversation(`arc-${i}`, 'U-001', i), archived: true }))
+    const result = pruneConversations([...active, ...archived])
+    expect(result.length).toBe(25)
+  })
+  it('某角色 35 条归档 → 留 30 条', () => {
+    const cs = Array.from({ length: 35 }, (_, i) => ({ ...newConversation(`conv-${i}`, 'U-001', i), archived: true }))
+    const result = pruneConversations(cs)
+    expect(result.length).toBe(MAX_ARCHIVED_PER_USER)
+    expect(result.map(c => c.id)).toEqual(cs.slice(0, 30).map(c => c.id))
+  })
+  it('返回值保持入参的相对顺序', () => {
+    const cs: Conversation[] = [
+      newConversation('conv-1', 'U-001', 1000),
+      newConversation('conv-2', 'U-002', 2000),
+      newConversation('conv-3', 'U-001', 3000),
+    ]
+    expect(pruneConversations(cs).map(c => c.id)).toEqual(['conv-1', 'conv-2', 'conv-3'])
+  })
+})
+
+describe('readConversations（archived 字段）', () => {
+  it('存了一条带 archived: true 的记录，读回来 archived 仍为 true', () => {
+    const c: Conversation = { ...newConversation('conv-1', 'U-001', 1000), archived: true }
+    const store = fakeStore({ 'orbitos.sidekick.conversations': JSON.stringify([c]) })
+    const result = readConversations(store)
+    expect(result[0].archived).toBe(true)
   })
 })

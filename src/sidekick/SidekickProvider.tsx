@@ -5,7 +5,6 @@ import { runAgent } from '../agent/loop'
 import { LlmRateLimited, resetUsage, sumUsage } from '../agent/llm'
 import { runReplay } from '../agent/replay'
 import { onAskAgent } from '../lib/bus'
-import { ROLE_META } from '../lib/rbac'
 import type { StepState } from './PlanChecklist'
 import { readUiPrefs, writeUiPrefs } from '../lib/uiPrefs'
 import {
@@ -65,11 +64,12 @@ export interface SidekickCtx {
   conversations: Conversation[]
   activeId: string
   activeConversation: Conversation
-  readOnly: boolean
-  readOnlyOwner: { name: string; roleLabel: string } | null
+  busyConvId: string | null
   newChat: () => void
   switchChat: (id: string) => void
   deleteChat: (id: string) => void
+  archiveChat: (id: string) => void
+  unarchiveChat: (id: string) => void
   resetConversations: () => void
 }
 
@@ -110,6 +110,7 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
   const [steps, setSteps] = useState<Record<string, StepState>>({})
   const [amended, setAmended] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
+  const [busyConvId, setBusyConvId] = useState<string | null>(null)
   const [replayMode, setReplayMode] = useState(false)
   const [input, setInput] = useState('')
   const pending = useRef<Map<string, (ok: boolean) => void>>(new Map())
@@ -127,11 +128,6 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
 
   const activeConversation = conversations.find(c => c.id === activeId) ?? conversations[0]
   const items = activeConversation.items
-  const readOnly = activeConversation.userId !== currentUser.id
-  const owner = readOnly ? useStore.getState().db.users.find(u => u.id === activeConversation.userId) : undefined
-  const readOnlyOwner = readOnly
-    ? { name: owner?.name ?? '—', roleLabel: owner ? ROLE_META[owner.role].label : '—' }
-    : null
 
   // 更新指定会话（不是「活跃会话」）的 items。必须是函数式更新——高频 emit 下闭包读旧 state 会丢事件
   // （P5 复审专门核过的点）。convId 由调用方在 ask() 开始时捕获成常量传入，不读 activeIdRef——
@@ -179,9 +175,10 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
   const requestConfirm = (id: string) =>
     new Promise<boolean>(res => { pending.current.set(id, res) })
 
-  // 只读会话不能提问，但「什么都不做」是最差的选择：首页风险卡的按钮经 bus 进来时，
-  // 用户看到的会是一个点了毫无反应的按钮，这个项目全程在反对静默禁用/静默无响应。
-  // 意图是明确的——他要在当前角色下问这件事——所以直接给他开一条属于当前角色的新会话。
+  // 切角色时的兜底：activeId 可能还指向上一个角色的会话（bus 路径尤其容易撞上——
+  // 风险卡的按钮可能是在角色切换的瞬间被点的），这时任何提问都必须落到当前角色自己的会话上，
+  // 而不是「什么都不做」——那样用户会看到一个点了毫无反应的按钮，这个项目全程在反对
+  // 静默禁用/静默无响应。意图是明确的：他要在当前角色下问这件事，直接给他开一条新会话。
   // 返回完整的 Conversation（而不是 id），这样调用方能立刻拿到正确的 history，
   // 不必去读可能落后一帧的 conversationsRef。
   function ensureWritableConversation(): Conversation {
@@ -200,8 +197,12 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
     if (busyRef.current || !q.trim()) return
     const targetConv = ensureWritableConversation()
     const targetId = targetConv.id
+    // 在归档会话里提问：它又活跃了，理应自动取消归档、回到主列表。
+    if (targetConv.archived) {
+      setConversations(cs => cs.map(c => c.id === targetId ? { ...c, archived: false } : c))
+    }
     busyRef.current = true
-    setBusy(true); setInput('')
+    setBusy(true); setBusyConvId(targetId); setInput('')
     updateItems(targetId, p => [...p, { k: 'user', text: q }], true)
     // 真跑成功时不该再挂着上一次失败留下的「录播模式」徽章。
     setReplayMode(false)
@@ -253,7 +254,7 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
           text: `本次问询消耗 ${u.total_tokens} tokens（输入 ${u.prompt_tokens} / 输出 ${u.completion_tokens}）` }])
       }
       busyRef.current = false
-      setBusy(false)
+      setBusy(false); setBusyConvId(null)
     }
   }
 
@@ -262,6 +263,29 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
   // bus 的 ask 是角色切换那一刻捕获的闭包，也不会读到过期状态（P5 brief 提示的坑，已处理）。
   // 抽屉可能是收起的：先展开再问，否则点击看起来毫无反应。
   useEffect(() => onAskAgent((q) => { setOpen(true); ask(q) }), [currentUser])
+
+  // 切角色时，面板要立刻变成"这个角色自己的东西"。否则列表按 userId 过滤之后，
+  // 列表是空的、面板里却还留着上一个角色的对话，比不过滤还让人困惑。
+  // 不受 busyRef 门禁——切角色是用户主动动作，必须立刻生效；不会串台，因为 ask() 已经在开头
+  // 捕获了 targetId，进行中那一轮的卡片仍然写回原会话。newChat() 内部的 busyRef 门禁在这里
+  // 可能挡住它，所以这里不调 newChat()，直接内联建会话的那几行（建会话本身没有副作用风险）。
+  useEffect(() => {
+    const uid = currentUser.id
+    const cur = conversationsRef.current.find(c => c.id === activeIdRef.current)
+    if (cur && cur.userId === uid && !cur.archived) return
+    const mine = conversationsRef.current.find(c => c.userId === uid && !c.archived)
+    if (mine) {
+      activeIdRef.current = mine.id
+      setActiveId(mine.id)
+      setSteps({}); setAmended(new Set())
+    } else {
+      const c = newConversation(newConvId(), uid, Date.now())
+      activeIdRef.current = c.id
+      setSteps({}); setAmended(new Set())
+      setConversations(cs => [c, ...cs])
+      setActiveId(c.id)
+    }
+  }, [currentUser])
 
   function decide(id: string, ok: boolean) {
     pending.current.get(id)?.(ok)
@@ -283,7 +307,11 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
 
   function switchChat(id: string) {
     if (busyRef.current) return
-    if (!conversations.some(c => c.id === id)) return
+    const target = conversations.find(c => c.id === id)
+    if (!target) return
+    // 第二道防线：UI 已经不会列出别人的会话了，这里是防止 activeId 被别的路径写脏。
+    // 允许静默 return——用户没有可点的入口，不存在"点了没反应"的困惑。
+    if (target.userId !== useStore.getState().currentUser.id) return
     setSteps({}); setAmended(new Set())
     setActiveId(id)
   }
@@ -299,6 +327,18 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  // 归档当前正在看的会话不跳走——用户归档完可能还想接着看，它只是从主列表消失、
+  // 出现在归档区里，activeId 不变。
+  function archiveChat(id: string) {
+    if (busyRef.current) return
+    setConversations(cs => cs.map(c => c.id === id ? { ...c, archived: true } : c))
+  }
+
+  function unarchiveChat(id: string) {
+    if (busyRef.current) return
+    setConversations(cs => cs.map(c => c.id === id ? { ...c, archived: false } : c))
+  }
+
   function resetConversations() {
     if (busyRef.current) return
     const c = newConversation(newConvId(), useStore.getState().currentUser.id, Date.now())
@@ -310,8 +350,8 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
   const value: SidekickCtx = {
     items, steps, amended, busy, replayMode, input, setInput, ask, decide,
     open, setOpen, wide, setWide,
-    conversations, activeId, activeConversation, readOnly, readOnlyOwner,
-    newChat, switchChat, deleteChat, resetConversations,
+    conversations, activeId, activeConversation, busyConvId,
+    newChat, switchChat, deleteChat, archiveChat, unarchiveChat, resetConversations,
   }
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

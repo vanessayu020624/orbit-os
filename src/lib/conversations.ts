@@ -8,14 +8,18 @@ import type { Item } from '../sidekick/SidekickProvider'
 export interface Conversation {
   id: string
   title: string
-  userId: string                        // 创建者，用于只读判定
+  userId: string                        // 创建者，会话列表按它过滤到当前角色
   createdAt: number                     // Date.now()
   items: Item[]
   history: { q: string; a: string }[]   // 喂给模型的最近两轮
+  archived?: boolean                    // 缺省 / undefined 一律视为未归档
 }
 
 const KEY = 'orbitos.sidekick.conversations'
+// 保留旧名字导出，避免破坏已有测试对它的直接引用；新代码一律用下面两个按角色分组的上限。
 export const MAX_CONVERSATIONS = 20
+export const MAX_ACTIVE_PER_USER = 20
+export const MAX_ARCHIVED_PER_USER = 30
 
 const UNRESOLVED_CONFIRM_ERROR = '这一轮的确认在页面刷新前未完成，已中断。'
 
@@ -39,6 +43,46 @@ export function sanitizeItems(items: Item[]): Item[] {
     }
     return it
   })
+}
+
+/** 当前角色的未归档会话，保持传入顺序（newest-first）。 */
+export function activeFor(cs: Conversation[], userId: string): Conversation[] {
+  return cs.filter(c => c.userId === userId && !c.archived)
+}
+
+/** 当前角色的已归档会话，保持传入顺序。 */
+export function archivedFor(cs: Conversation[], userId: string): Conversation[] {
+  return cs.filter(c => c.userId === userId && !!c.archived)
+}
+
+/** 不属于当前角色的会话条数（归档的也算）。用于列表底部那行显式边界文案。 */
+export function otherRoleCount(cs: Conversation[], userId: string): number {
+  return cs.filter(c => c.userId !== userId).length
+}
+
+/** 超额裁剪：按 userId 分组，每个角色未归档留 MAX_ACTIVE_PER_USER 条、
+ *  已归档留 MAX_ARCHIVED_PER_USER 条，各自丢弃最旧的（数组末尾的）。
+ *  返回值必须保持入参的相对顺序，不要重排。 */
+export function pruneConversations(cs: Conversation[]): Conversation[] {
+  const activeSeen = new Map<string, number>()
+  const archivedSeen = new Map<string, number>()
+  const keep = new Set<Conversation>()
+  for (const c of cs) {
+    if (c.archived) {
+      const n = archivedSeen.get(c.userId) ?? 0
+      if (n < MAX_ARCHIVED_PER_USER) {
+        keep.add(c)
+        archivedSeen.set(c.userId, n + 1)
+      }
+    } else {
+      const n = activeSeen.get(c.userId) ?? 0
+      if (n < MAX_ACTIVE_PER_USER) {
+        keep.add(c)
+        activeSeen.set(c.userId, n + 1)
+      }
+    }
+  }
+  return cs.filter(c => keep.has(c))
 }
 
 function getStorage(store?: Pick<Storage, 'getItem'>): Pick<Storage, 'getItem'> | null {
@@ -87,7 +131,7 @@ export function readConversations(store?: Pick<Storage, 'getItem'>): Conversatio
   return out
 }
 
-/** 写入；最多保留最近 MAX_CONVERSATIONS 条（按数组顺序取前 N 条），超额丢弃最旧的。 */
+/** 写入；按角色分组裁剪超额会话（见 pruneConversations），绝不抛异常。 */
 export function writeConversations(cs: Conversation[], store?: Pick<Storage, 'setItem'>): void {
   const s = store ?? (() => {
     try {
@@ -98,7 +142,7 @@ export function writeConversations(cs: Conversation[], store?: Pick<Storage, 'se
   })()
   if (!s) return
   try {
-    s.setItem(KEY, JSON.stringify(cs.slice(0, MAX_CONVERSATIONS)))
+    s.setItem(KEY, JSON.stringify(pruneConversations(cs)))
   } catch {
     // Safari 隐私模式、配额超限等：忽略
   }
