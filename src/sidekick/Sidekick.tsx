@@ -16,6 +16,15 @@ const PRESETS = [
   '我这个月的商机漏斗情况怎么样？',
 ]
 
+// Ruling T4-B：录播只录了两个场景，猜错场景会答非所问、但看起来像真的，比明说"不支持"更糟。
+// 命中不了任何场景就不猜，交给调用方走诚实降级提示。
+type Scene = 'delivery' | 'permission' | null
+function pickScene(q: string): Scene {
+  if (/风险|交期|延期|发货/.test(q)) return 'delivery'
+  if (/最大|排名|客户/.test(q)) return 'permission'
+  return null
+}
+
 type Item =
   | { k: 'user'; text: string }
   | { k: 'plan'; plan: Plan }
@@ -85,8 +94,13 @@ export function Sidekick() {
       })
     } catch {
       setReplayMode(true)
-      const scene = /风险|交期|延期|发货/.test(q) ? 'delivery' : 'permission'
-      await runReplay(scene, onEvent, (id) => confirmFn(id))
+      const scene = pickScene(q)
+      if (scene) {
+        await runReplay(scene, onEvent, (id) => confirmFn(id))
+      } else {
+        setItems(p => [...p, { k: 'error', text:
+          '当前网络不可用，已切换到录播模式。录播仅内置「交期风险排查」与「权限差异」两个演示场景，这个问题需要联网后重试。' }])
+      }
     } finally {
       setBusy(false)
     }
