@@ -52,3 +52,20 @@
 - ⚠️ 坑（本期新发现，未擅自改 loop.ts，仅记录）：loop.ts 用正文里的正则 `/需要追加步骤[：:]\s*(.+)/`
   识别动态重规划，且工具调用检测靠 `res.tool_calls` 是否为空来判断"是否收尾"——这两者都要求 GLM 严格按
   OpenAI tool_calls 结构返回且在文本追加步骤时不同时携带 tool_calls，未见真实响应前无法确认 GLM 是否符合
+
+## P5 完成 (2026-09-02)
+- Dashboard：风险卡 + KPI×4 + 图表×3（漏斗/订单状态饼图/12周发货趋势）+ 4 秒 tick，拆到 src/pages/dashboard/*
+- src/lib/bus.ts：askAgent(q) / onAskAgent(h)，风险卡点击驱动 Sidekick 自动开跑
+- Ruling T5-A 已落地：risk.ts 新增 countDeliveryRiskOrders(db,user)（提取 buildRiskCards 内部的
+  14 天窗口筛选为 pendingDeliveryWindow 共用，未改 buildRiskCards 签名/行为），KPI#3 改「交期风险订单」
+- ⚠️ 坑：tick 必须排除 SO-P* 埋雷订单，否则风险自己就消失了（已照办）
+- ⚠️ 坑（本期实测发现，与派发时的口头验证不符）：countDeliveryRiskOrders(db, 王强) 实测为 **2**，不是
+  派单说的 3。risk.test.ts 里 SO-2026-0412 本来就无缺货（riskLevel='none'），高风险只有 0428/0435 两张，
+  这与 buildRiskCards 卡片标题里 `${risks.length} 张订单存在交期风险` 用的是同一个数字，两者互相印证。
+  验收文案第 3 条按实测口径记：批准采购单后风险卡消失，KPI 从 2 变 0（不是 3 变 0）
+- ⚠️ 坑：Sidekick.tsx 的 `useEffect(() => onAskAgent(ask), [currentUser])` 按 brief 原文写会让 bus 注册
+  的 ask 闭包捕获角色切换那一刻的 busy 快照，并发拦截可能失效；已加 busyRef 做实时并发拦截，并把
+  runAgent 的 user 参数改读 useStore.getState().currentUser，不依赖闭包快照
+- 未执行的验收项（沙箱无浏览器/网络）：Step 5.5 全部 6 条需人工在浏览器里过一遍，本期只做了对应的
+  vitest 数值验证（风险卡存在性、KPI 数字、角色差异）和静态检查，20 秒静置观察数字变化、点击按钮跳转
+  Sidekick、重置按钮回填风险卡这几条纯 UI 交互未做浏览器实测

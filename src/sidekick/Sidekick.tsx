@@ -1,10 +1,11 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { AgentEvent, Plan } from '../lib/types'
 import { useStore } from '../lib/store'
 import { ROLE_META } from '../lib/rbac'
 import { toolsFor } from '../agent/registry'
 import { runAgent } from '../agent/loop'
 import { runReplay } from '../agent/replay'
+import { onAskAgent } from '../lib/bus'
 import { PlanChecklist, type StepState } from './PlanChecklist'
 import { ToolCallCard } from './ToolCallCard'
 import { ConfirmCard } from './ConfirmCard'
@@ -43,6 +44,9 @@ export function Sidekick() {
   const [replayMode, setReplayMode] = useState(false)
   const [input, setInput] = useState('')
   const pending = useRef<Map<string, (ok: boolean) => void>>(new Map())
+  // busy 状态用于渲染禁用输入框；busyRef 供 ask() 内部做实时并发拦截，
+  // 避免 bus 订阅注册的旧闭包读到渲染时快照的 busy（见下方 useEffect 的说明）。
+  const busyRef = useRef(false)
 
   const toolCount = toolsFor(currentUser.role).length
 
@@ -81,13 +85,16 @@ export function Sidekick() {
     new Promise<boolean>(res => { pending.current.set(id, res) })
 
   async function ask(q: string) {
-    if (busy || !q.trim()) return
+    if (busyRef.current || !q.trim()) return
+    busyRef.current = true
     setBusy(true); setInput('')
     setItems(p => [...p, { k: 'user', text: q }])
     const confirmFn = (id: string) => requestConfirm(id)
     try {
+      // currentUser 来自 useStore.getState()：即便本次 ask 闭包是 bus 在上一次角色切换时
+      // 注册的旧闭包，这里取的也是调用时刻的实时角色，不会读到渲染快照。
       await runAgent({
-        question: q, user: currentUser,
+        question: q, user: useStore.getState().currentUser,
         getDb: () => useStore.getState().db,
         mutate: applyMutation, emit: onEvent, pushAudit,
         requestConfirm: (id) => confirmFn(id),
@@ -102,9 +109,15 @@ export function Sidekick() {
           '当前网络不可用，已切换到录播模式。录播仅内置「交期风险排查」与「权限差异」两个演示场景，这个问题需要联网后重试。' }])
       }
     } finally {
+      busyRef.current = false
       setBusy(false)
     }
   }
+
+  // 风险卡「让 Agent 排查 →」通过全局事件总线驱动本组件。ask 内部已改为从
+  // useStore.getState() 读取实时 currentUser、用 busyRef 做并发拦截，因此即便这里注册进
+  // bus 的 ask 是角色切换那一刻捕获的闭包，也不会读到过期状态（P5 brief 提示的坑，已处理）。
+  useEffect(() => onAskAgent(ask), [currentUser])
 
   function decide(id: string, ok: boolean) {
     pending.current.get(id)?.(ok)

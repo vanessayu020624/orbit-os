@@ -64,15 +64,25 @@ export interface RiskCard {
   title: string; detail: string; question: string
 }
 
+// 14 天而非 7 天：埋雷的三张订单交期是 09-08/09-10/09-11，7 天窗口只能捞到第一张（它不缺货），
+// 风险卡会永远不出现。改动此常量前先跑 risk.test.ts。
+function pendingDeliveryWindow(db: DbSnapshot, user: User) {
+  const horizon = new Date(Date.parse(TODAY) + 14 * DAY).toISOString().slice(0, 10)
+  return scopeOrders(db, user)
+    .filter(o => o.status === '待发货'
+              && o.promisedDeliveryDate >= TODAY && o.promisedDeliveryDate <= horizon)
+}
+
+/** 首页「交期风险订单」KPI 与风险卡共用的口径：14 天窗口内高风险订单数。 */
+export function countDeliveryRiskOrders(db: DbSnapshot, user: User): number {
+  const pending = pendingDeliveryWindow(db, user)
+  return simulateDeliveryRisk(db, pending.map(o => o.id)).filter(r => r.riskLevel === 'high').length
+}
+
 /** 首页 Agent 主动风险卡。点击后把 question 灌进 Sidekick 直接开跑。 */
 export function buildRiskCards(db: DbSnapshot, user: User): RiskCard[] {
   const cards: RiskCard[] = []
-  // 14 天而非 7 天：埋雷的三张订单交期是 09-08/09-10/09-11，7 天窗口只能捞到第一张（它不缺货），
-  // 风险卡会永远不出现。改动此常量前先跑 risk.test.ts。
-  const horizon = new Date(Date.parse(TODAY) + 14 * DAY).toISOString().slice(0, 10)
-  const pending = scopeOrders(db, user)
-    .filter(o => o.status === '待发货'
-              && o.promisedDeliveryDate >= TODAY && o.promisedDeliveryDate <= horizon)
+  const pending = pendingDeliveryWindow(db, user)
   const risks = simulateDeliveryRisk(db, pending.map(o => o.id)).filter(r => r.riskLevel === 'high')
   if (risks.length) {
     const gap = risks.flatMap(r => r.shortages).reduce((s, x) => s + x.gap, 0)
