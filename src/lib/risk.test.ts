@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { generateSeed } from './seed'
 import { simulateDeliveryRisk, buildRiskCards } from './risk'
+import { scopeCustomers, scopeReceivables } from './rbac'
 
 const db = generateSeed(42)
 
@@ -34,5 +35,14 @@ describe('主动风险卡', () => {
   it('CEO 额外看到应收逾期卡', () => {
     const ceo = db.users.find(u => u.name === '陈立')!
     expect(buildRiskCards(db, ceo).some(c => c.id === 'RC-ar')).toBe(true)
+  })
+  it('销售总监的应收逾期风险卡做了团队隔离', () => {
+    const lina = db.users.find(u => u.name === '李娜')!
+    const customerIds = new Set(scopeCustomers(db, lina).map(c => c.id))
+    const overdue = scopeReceivables(db, lina).filter(r => r.status === '已逾期' && r.dueDate < '2026-07-04')
+    expect(overdue.length).toBeGreaterThan(0)
+    expect(overdue.every(r => customerIds.has(r.customerId))).toBe(true)
+    const arCard = buildRiskCards(db, lina).find(c => c.id === 'RC-ar')!
+    expect(arCard.title).toBe(`${overdue.length} 笔应收逾期超 60 天`)
   })
 })

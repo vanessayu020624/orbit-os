@@ -1,6 +1,6 @@
 import type { DbSnapshot, User } from './types'
 import { TODAY } from './types'
-import { scopeOrders } from './rbac'
+import { scopeOrders, scopeReceivables } from './rbac'
 
 export interface Shortage {
   skuId: string; sku: string; skuName: string
@@ -95,7 +95,7 @@ export function buildRiskCards(db: DbSnapshot, user: User): RiskCard[] {
     })
   }
   if (user.role === 'sales_director' || user.role === 'ceo') {
-    const overdue = db.receivables.filter(r => r.status === '已逾期' && r.dueDate < '2026-07-04')
+    const overdue = scopeReceivables(db, user).filter(r => r.status === '已逾期' && r.dueDate < '2026-07-04')
     if (overdue.length) {
       const amt = overdue.reduce((s, r) => s + r.amount - r.paidAmount, 0)
       cards.push({
