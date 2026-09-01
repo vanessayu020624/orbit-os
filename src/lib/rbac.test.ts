@@ -4,6 +4,7 @@ import {
   scopeCustomers, scopeOrders, scopeOpportunities, scopeReceivables, maskOrderForRole,
   canSeeCustomerFinancials, overrideNoticeFor, scopeSummary, boundaryReason,
 } from './rbac'
+import { scopeHeaderText, scopeEmptyText } from './scopeText'
 import { toolsFor, executeTool } from '../agent/registry'
 
 const db = generateSeed(42)
@@ -76,7 +77,10 @@ describe('客户财务字段可见性', () => {
 describe('显式边界：scopeSummary', () => {
   it('张伟（销售代表）看客户：9/48，basis 为「你本人名下」', () => {
     const s = scopeSummary(db, u('张伟'), 'customers')
-    expect(s).toEqual({ visible: 9, total: 48, hidden: 39, basis: '你本人名下' })
+    expect(s).toEqual({
+      visible: 9, total: 48, hidden: 39,
+      basis: '你本人名下', denied: false, label: '客户',
+    })
   })
   it('陈立（CEO）看订单：hidden 为 0', () => {
     const s = scopeSummary(db, u('陈立'), 'orders')
@@ -88,16 +92,31 @@ describe('显式边界：scopeSummary', () => {
     expect(s.basis).toBe('你所在团队')
     expect(s.hidden).toBeGreaterThan(0)
   })
-  it('王强（供应链）看客户/订单 basis 为「全公司」，看商机/应收 basis 为「无权查看」', () => {
-    expect(scopeSummary(db, u('王强'), 'customers').basis).toBe('全公司')
-    expect(scopeSummary(db, u('王强'), 'orders').basis).toBe('全公司')
-    expect(scopeSummary(db, u('王强'), 'opportunities').basis).toBe('无权查看')
-    expect(scopeSummary(db, u('王强'), 'receivables').basis).toBe('无权查看')
+  it('张伟（销售代表）看应收是整类无权，不是「范围外还有 120 条」', () => {
+    // registry 层就拒绝 query_receivables，界面文案必须与之一致，不能说成有范围。
+    const s = scopeSummary(db, u('张伟'), 'receivables')
+    expect(s.denied).toBe(true)
+    expect(scopeHeaderText(s)).toBe('你没有查看应收的权限 · 全公司共 120 条')
+  })
+  it('王强（供应链）看客户/订单未被裁剪，看商机/应收是整类无权（denied）', () => {
+    expect(scopeSummary(db, u('王强'), 'customers')).toMatchObject({ basis: '全公司', denied: false, hidden: 0 })
+    expect(scopeSummary(db, u('王强'), 'orders')).toMatchObject({ basis: '全公司', denied: false, hidden: 0 })
+    // denied 与 hidden>0 是两件事：整类无权，文案不能说成「范围外还有」。
+    expect(scopeSummary(db, u('王强'), 'opportunities')).toMatchObject({ denied: true, visible: 0, total: 90 })
+    expect(scopeSummary(db, u('王强'), 'receivables')).toMatchObject({ denied: true, visible: 0, total: 120 })
+  })
+  it('整类无权时，表头与空态文案不出现「无权查看内」这种拗口拼接', () => {
+    const s = scopeSummary(db, u('王强'), 'opportunities')
+    expect(scopeHeaderText(s)).toBe('你没有查看商机的权限 · 全公司共 90 条')
+    expect(scopeEmptyText(s)).toBe('你没有查看商机的权限。全公司共 90 条，均超出你的查看范围。')
+    expect(boundaryReason(s, 'opportunities')).not.toContain('无权查看内')
   })
   it('boundaryReason 在 hidden 为 0 与大于 0 时文案不同', () => {
-    const noHidden = boundaryReason({ visible: 5, total: 5, hidden: 0, basis: '全公司' }, 'orders')
+    const noHidden = boundaryReason(
+      { visible: 5, total: 5, hidden: 0, basis: '全公司', denied: false, label: '订单' }, 'orders')
     expect(noHidden).not.toContain('超出你的查看范围')
-    const withHidden = boundaryReason({ visible: 0, total: 120, hidden: 120, basis: '你本人名下' }, 'receivables')
+    const withHidden = boundaryReason(
+      { visible: 0, total: 120, hidden: 120, basis: '你本人名下', denied: false, label: '应收' }, 'receivables')
     expect(withHidden).toContain('全公司另有 120 条，超出你的查看范围')
   })
 })

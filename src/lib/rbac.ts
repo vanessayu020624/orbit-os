@@ -93,16 +93,35 @@ export function overrideNoticeFor(toolName: string, role: Role): string | null {
 
 export type ScopedEntity = 'customers' | 'opportunities' | 'orders' | 'receivables'
 
-export interface ScopeSummary { visible: number; total: number; hidden: number; basis: string }
+/**
+ * denied 与 hidden>0 是两件事：hidden 表示「有范围，范围外还有一些」，
+ * denied 表示「这类数据你整个看不到」。两者文案不同，不能共用一套模板。
+ */
+export interface ScopeSummary {
+  visible: number; total: number; hidden: number
+  basis: string; denied: boolean; label: string
+}
 
 const ENTITY_LABEL: Record<ScopedEntity, string> = {
   customers: '客户', opportunities: '商机', orders: '订单', receivables: '应收',
 }
 
-function basisFor(role: Role, entity: ScopedEntity): string {
-  if (role === 'supply_chain') {
-    return entity === 'orders' || entity === 'customers' ? '全公司' : '无权查看'
-  }
+/**
+ * 整类无权的组合（对应 PRD 权限矩阵里打 ✗ 的格子），与「有范围、范围外还有」不是一回事。
+ * 判据是角色对该实体压根没有入口，而不是过滤后恰好为空。
+ */
+const DENIED_PAIRS: ReadonlySet<string> = new Set([
+  'supply_chain:opportunities',
+  'supply_chain:receivables',
+  'sales_rep:receivables',
+])
+
+function deniedFor(role: Role, entity: ScopedEntity): boolean {
+  return DENIED_PAIRS.has(`${role}:${entity}`)
+}
+
+function basisFor(role: Role): string {
+  if (role === 'supply_chain') return '全公司'
   const byRole: Record<'sales_rep' | 'sales_director' | 'ceo', string> = {
     sales_rep: '你本人名下', sales_director: '你所在团队', ceo: '全公司',
   }
@@ -131,7 +150,12 @@ function totalCount(db: DbSnapshot, entity: ScopedEntity): number {
 export function scopeSummary(db: DbSnapshot, user: User, entity: ScopedEntity): ScopeSummary {
   const visible = scopedCount(db, user, entity)
   const total = totalCount(db, entity)
-  return { visible, total, hidden: total - visible, basis: basisFor(user.role, entity) }
+  return {
+    visible, total, hidden: total - visible,
+    basis: basisFor(user.role),
+    denied: deniedFor(user.role, entity),
+    label: ENTITY_LABEL[entity],
+  }
 }
 
 /**
@@ -140,6 +164,7 @@ export function scopeSummary(db: DbSnapshot, user: User, entity: ScopedEntity): 
  */
 export function boundaryReason(s: ScopeSummary, entity: ScopedEntity): string {
   const label = ENTITY_LABEL[entity]
-  const base = `${s.basis}内没有符合条件的${label}`
+  if (s.denied) return `你没有查看${label}的权限。全公司共 ${s.total} 条，均超出你的查看范围。`
+  const base = `${s.basis}没有符合条件的${label}`
   return s.hidden > 0 ? `${base}；全公司另有 ${s.hidden} 条，超出你的查看范围。` : `${base}。`
 }
