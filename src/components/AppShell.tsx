@@ -12,7 +12,7 @@ interface NavGroup { title: string | null; items: NavItem[] }
 const NAV_GROUPS: NavGroup[] = [
   { title: null, items: [
     { to: '/',              label: '仪表盘', entity: null },
-    { to: '/agent',         label: 'AI 助手', entity: null },
+    { to: '/agent',         label: '星轨', entity: null },
   ] },
   { title: '销售', items: [
     { to: '/customers',     label: '客户',   entity: 'customers' },
@@ -78,8 +78,9 @@ export function AppShell({ children, sidekick }: { children: ReactNode; sidekick
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-14 shrink-0 bg-white border-b flex items-center justify-between px-6">
           <RoleSwitcher />
-          <button onClick={() => { reset(); resetConversations() }}
-            className="text-sm text-slate-500 hover:text-danger px-3 py-1.5 rounded hover:bg-slate-50">
+          <button onClick={() => { reset(); resetConversations() }} disabled={busy}
+            title={busy ? '星轨正在执行本轮问询，结束后才能重置' : undefined}
+            className="text-sm text-slate-500 hover:text-danger px-3 py-1.5 rounded hover:bg-slate-50 disabled:opacity-40">
             重置演示数据
           </button>
         </header>
@@ -103,7 +104,7 @@ export function AppShell({ children, sidekick }: { children: ReactNode; sidekick
             </button>
           </div>
           <div className="flex-1 min-h-0">
-            {sidekick ?? <div className="p-6 text-slate-400 text-sm">AI Sidekick（P4 实现）</div>}
+            {sidekick ?? <div className="p-6 text-slate-400 text-sm">星轨（未挂载）</div>}
           </div>
         </aside>
       )}
@@ -112,7 +113,7 @@ export function AppShell({ children, sidekick }: { children: ReactNode; sidekick
         <button onClick={() => setOpen(true)}
           className="fixed bottom-6 right-6 flex items-center gap-2 px-4 py-2.5 rounded-full
                      bg-brand text-white text-sm shadow-lg hover:opacity-90">
-          <span>AI Sidekick</span>
+          <span>星轨</span>
           {/* 按钮底色就是 bg-brand，圆点必须用白色才看得见 */}
           {busy && <span className="w-2 h-2 rounded-full bg-white animate-pulse" />}
         </button>

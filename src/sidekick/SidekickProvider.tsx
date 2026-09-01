@@ -100,6 +100,12 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
   const [activeId, setActiveId] = useState<string>(() => conversations[0].id)
   const activeIdRef = useRef(activeId)
   useEffect(() => { activeIdRef.current = activeId }, [activeId])
+  // 供 ensureWritableConversation 在事件循环之外（bus 路径）读取最新会话列表。
+  // 只能在 effect 里同步，不能写进 setConversations 的更新函数内部——
+  // React 严格模式会双调用更新函数，那样会导致 ref 被写两次而状态本身只变一次，不是本质问题，
+  // 但把有副作用的写操作放进 reducer 是明确的反模式，这里避免。
+  const conversationsRef = useRef(conversations)
+  useEffect(() => { conversationsRef.current = conversations }, [conversations])
 
   const [steps, setSteps] = useState<Record<string, StepState>>({})
   const [amended, setAmended] = useState<Set<string>>(new Set())
@@ -127,23 +133,26 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
     ? { name: owner?.name ?? '—', roleLabel: owner ? ROLE_META[owner.role].label : '—' }
     : null
 
-  // 更新活跃会话的 items（同步刷新 title）。必须是函数式更新——高频 emit 下闭包读旧 state 会丢事件
-  // （P5 复审专门核过的点）。用 activeIdRef 而不是闭包里的 activeId，因为 onEvent 会被 runAgent
-  // 反复调用，闭包可能是旧渲染的快照；activeIdRef 保证一次问询的全部事件写进同一个会话，
-  // 哪怕用户中途切了会话。
-  function updateActiveItems(fn: (items: Item[]) => Item[]) {
-    setConversations(cs => cs.map(c => c.id === activeIdRef.current
-      ? { ...c, items: fn(c.items), title: titleFor(fn(c.items)) } : c))
+  // 更新指定会话（不是「活跃会话」）的 items。必须是函数式更新——高频 emit 下闭包读旧 state 会丢事件
+  // （P5 复审专门核过的点）。convId 由调用方在 ask() 开始时捕获成常量传入，不读 activeIdRef——
+  // 一次问询自始至终写同一个会话，哪怕用户中途切了会话/新建了会话/触发了重置。
+  // title 只在 retitle=true（追加首条 user 消息时）才重算，其余高频事件不必每次都重算一次标题。
+  function updateItems(convId: string, fn: (items: Item[]) => Item[], retitle = false) {
+    setConversations(cs => cs.map(c => {
+      if (c.id !== convId) return c
+      const items = fn(c.items)
+      return { ...c, items, title: retitle ? titleFor(items) : c.title }
+    }))
   }
 
-  function onEvent(e: AgentEvent) {
+  function onEvent(convId: string, e: AgentEvent) {
     switch (e.type) {
       case 'plan':
-        updateActiveItems(p => [...p, { k: 'plan', plan: e.plan }])
+        updateItems(convId, p => [...p, { k: 'plan', plan: e.plan }])
         setSteps(Object.fromEntries(e.plan.steps.map(s => [s.id, 'pending' as StepState])))
         break
       case 'plan_amended':
-        updateActiveItems(p => p.map(it => it.k === 'plan'
+        updateItems(convId, p => p.map(it => it.k === 'plan'
           ? { ...it, plan: { ...it.plan, steps: [...it.plan.steps, ...e.addedSteps] } } : it))
         setAmended(s => new Set([...s, ...e.addedSteps.map(x => x.id)]))
         setSteps(s => ({ ...s, ...Object.fromEntries(e.addedSteps.map(x => [x.id, 'pending' as StepState])) }))
@@ -151,34 +160,49 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
       case 'step_start': setSteps(s => ({ ...s, [e.stepId]: 'running' })); break
       case 'step_done':  setSteps(s => ({ ...s, [e.stepId]: 'done' })); break
       case 'tool_call':
-        updateActiveItems(p => [...p, { k: 'tool', id: e.id, name: e.name, args: e.args }]); break
+        updateItems(convId, p => [...p, { k: 'tool', id: e.id, name: e.name, args: e.args }]); break
       case 'tool_result':
-        updateActiveItems(p => p.map(it => it.k === 'tool' && it.id === e.id
+        updateItems(convId, p => p.map(it => it.k === 'tool' && it.id === e.id
           ? { ...it, result: e.result, ms: e.ms } : it)); break
       case 'confirm_request':
-        updateActiveItems(p => [...p, { k: 'confirm', id: e.id, toolName: e.toolName, summary: e.summary }]); break
+        updateItems(convId, p => [...p, { k: 'confirm', id: e.id, toolName: e.toolName, summary: e.summary }]); break
       case 'confirm_resolved':
-        updateActiveItems(p => p.map(it => it.k === 'confirm' && it.id === e.id
+        updateItems(convId, p => p.map(it => it.k === 'confirm' && it.id === e.id
           ? { ...it, resolved: e.approved } : it)); break
       case 'final':
-        updateActiveItems(p => [...p, { k: 'final', text: e.text, refs: e.refs }]); break
+        updateItems(convId, p => [...p, { k: 'final', text: e.text, refs: e.refs }]); break
       case 'error':
-        updateActiveItems(p => [...p, { k: 'error', text: e.message }]); break
+        updateItems(convId, p => [...p, { k: 'error', text: e.message }]); break
     }
   }
 
   const requestConfirm = (id: string) =>
     new Promise<boolean>(res => { pending.current.set(id, res) })
 
+  // 只读会话不能提问，但「什么都不做」是最差的选择：首页风险卡的按钮经 bus 进来时，
+  // 用户看到的会是一个点了毫无反应的按钮，这个项目全程在反对静默禁用/静默无响应。
+  // 意图是明确的——他要在当前角色下问这件事——所以直接给他开一条属于当前角色的新会话。
+  // 返回完整的 Conversation（而不是 id），这样调用方能立刻拿到正确的 history，
+  // 不必去读可能落后一帧的 conversationsRef。
+  function ensureWritableConversation(): Conversation {
+    const uid = useStore.getState().currentUser.id
+    const cur = conversationsRef.current.find(c => c.id === activeIdRef.current)
+    if (cur && cur.userId === uid) return cur
+    const c = newConversation(newConvId(), uid, Date.now())
+    activeIdRef.current = c.id
+    setSteps({}); setAmended(new Set())
+    setConversations(cs => [c, ...cs])
+    setActiveId(c.id)
+    return c
+  }
+
   async function ask(q: string) {
     if (busyRef.current || !q.trim()) return
-    // 只读会话第二道防线：UI 已经禁用了入口，这里再拦一次（和工具层的双层 RBAC 同一个思路）。
-    const askConvId = activeIdRef.current
-    const askConv = conversations.find(c => c.id === askConvId)
-    if (!askConv || askConv.userId !== useStore.getState().currentUser.id) return
+    const targetConv = ensureWritableConversation()
+    const targetId = targetConv.id
     busyRef.current = true
     setBusy(true); setInput('')
-    updateActiveItems(p => [...p, { k: 'user', text: q }])
+    updateItems(targetId, p => [...p, { k: 'user', text: q }], true)
     // 真跑成功时不该再挂着上一次失败留下的「录播模式」徽章。
     setReplayMode(false)
     resetUsage()
@@ -187,7 +211,7 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
     let finalText = ''
     const emit = (e: AgentEvent) => {
       if (e.type === 'final') finalText = e.text
-      onEvent(e)
+      onEvent(targetId, e)
     }
     const confirmFn = (id: string) => requestConfirm(id)
     // 本次运行认定的角色。取自 useStore.getState()：即便本次 ask 闭包是 bus 在上一次角色切换时
@@ -200,32 +224,32 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
         getDb: () => useStore.getState().db,
         mutate: applyMutation, emit, pushAudit,
         requestConfirm: (id) => confirmFn(id),
-        history: askConv.history,
+        history: targetConv.history,
       })
     } catch (e) {
       const limited = e instanceof LlmRateLimited
       setReplayMode(true)
       const scene = pickScene(q)
       // 真实卡片已经 emit 过一部分，录播从这里接管，必须有肉眼可见的分界。
-      updateActiveItems(p => [...p, { k: 'divider', text: limited
+      updateItems(targetId, p => [...p, { k: 'divider', text: limited
         ? '模型并发已满（1302），以下为录播内容'
         : '模型连接失败，以下为录播内容' }])
       if (scene) {
         await runReplay(scene, askUser, emit, (id) => confirmFn(id))
       } else {
-        updateActiveItems(p => [...p, { k: 'error', text: limited
+        updateItems(targetId, p => [...p, { k: 'error', text: limited
           ? '智谱免费档并发上限为 2 路，当前已占满（错误码 1302），且这个问题不在录播的两个场景内。稍等几秒重试即可。'
           : '当前无法连接模型，且这个问题不在录播的「交期风险排查」与「权限差异」两个场景内。' }])
       }
     } finally {
       // 只有当前角色仍然是发起这次提问的角色时，才把这一轮写进历史。见 shouldRecordTurn。
       if (shouldRecordTurn(askUser.id, useStore.getState().currentUser.id, finalText)) {
-        setConversations(cs => cs.map(c => c.id === askConvId
+        setConversations(cs => cs.map(c => c.id === targetId
           ? { ...c, history: [...c.history, { q, a: finalText }].slice(-2) } : c))
       }
       const u = sumUsage()
       if (u.total_tokens > 0) {
-        updateActiveItems(p => [...p, { k: 'divider',
+        updateItems(targetId, p => [...p, { k: 'divider',
           text: `本次问询消耗 ${u.total_tokens} tokens（输入 ${u.prompt_tokens} / 输出 ${u.completion_tokens}）` }])
       }
       busyRef.current = false
@@ -244,8 +268,13 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
     pending.current.delete(id)
   }
 
+  // 四个会话管理操作统一用 busyRef（而非渲染态 busy）做并发拦截：理由和 ask() 一样——
+  // 它们可能被非渲染路径（bus、事件回调）调用，读渲染快照的 busy 可能过期。
+  // 一次问询跑到一半切走/删除/重置活跃会话，会让 updateItems 写不到目标会话，答案凭空消失；
+  // 所以这里直接拒绝，而不是「切走了再默默丢事件」。
+
   function newChat() {
-    if (busy) return
+    if (busyRef.current) return
     const c = newConversation(newConvId(), useStore.getState().currentUser.id, Date.now())
     setSteps({}); setAmended(new Set())
     setConversations(cs => [c, ...cs])
@@ -253,13 +282,14 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
   }
 
   function switchChat(id: string) {
-    if (busy) return
+    if (busyRef.current) return
     if (!conversations.some(c => c.id === id)) return
     setSteps({}); setAmended(new Set())
     setActiveId(id)
   }
 
   function deleteChat(id: string) {
+    if (busyRef.current) return
     const rest = conversations.filter(c => c.id !== id)
     const next = rest.length > 0 ? rest : [newConversation(newConvId(), useStore.getState().currentUser.id, Date.now())]
     setConversations(next)
@@ -270,6 +300,7 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
   }
 
   function resetConversations() {
+    if (busyRef.current) return
     const c = newConversation(newConvId(), useStore.getState().currentUser.id, Date.now())
     setSteps({}); setAmended(new Set())
     setConversations([c])

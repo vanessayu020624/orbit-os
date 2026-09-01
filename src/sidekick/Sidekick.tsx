@@ -18,7 +18,7 @@ export function Sidekick() {
     <div className="flex flex-col h-full">
       <div className="px-4 py-3 border-b">
         <div className="flex items-center justify-between">
-          <div className="font-medium text-sm">AI Sidekick</div>
+          <div className="font-medium text-sm">星轨</div>
           {c.replayMode && <span className="text-[10px] px-1.5 py-0.5 rounded bg-warn/20 text-warn">录播模式</span>}
         </div>
         <div className="text-xs text-slate-400 mt-0.5">
