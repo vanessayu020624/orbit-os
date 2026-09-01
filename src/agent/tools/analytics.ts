@@ -96,8 +96,19 @@ export const analyticsTools: ToolDef[] = [
     },
     run: (a, ctx) => {
       let ids: string[]
+      let deniedCount = 0
       if (a.orderNos?.length) {
-        ids = a.orderNos
+        // 即使这个工具对所有角色开放，也不能因为传了 orderNos 就绕过 scope——
+        // 与其它工具一致，只对当前角色有权访问的订单放行；越权的订单号被过滤而非静默混入结果。
+        const scoped = scopeOrders(ctx.db, ctx.user)
+        const scopedRefs = new Set(scoped.flatMap(o => [o.id, o.orderNo]))
+        const requested: string[] = a.orderNos
+        const allowed = requested.filter(x => scopedRefs.has(x))
+        deniedCount = requested.length - allowed.length
+        if (!allowed.length) {
+          return { found: false, reason: '指定的订单均不在当前角色权限范围内' }
+        }
+        ids = allowed
       } else {
         const horizon = new Date(Date.parse(TODAY) + (a.withinDays ?? 14) * 86400000).toISOString().slice(0, 10)
         ids = scopeOrders(ctx.db, ctx.user)
@@ -108,7 +119,13 @@ export const analyticsTools: ToolDef[] = [
       if (!ids.length) return { found: false, reason: '没有符合条件的待发货订单' }
       const risks = simulateDeliveryRisk(ctx.db, ids)
       if (!risks.length) return { found: false, reason: '指定订单未找到' }
-      return { count: risks.length, risks }
+      return {
+        count: risks.length, risks,
+        ...(deniedCount > 0 ? {
+          deniedCount,
+          deniedReason: `另有 ${deniedCount} 个订单不在当前角色权限范围内，已过滤`,
+        } : {}),
+      }
     },
   },
 ]

@@ -76,6 +76,27 @@ describe('演示剧本 A：交期风险', () => {
   })
 })
 
+describe('simulate_delivery_risk 传入 orderNos 也要过 scope（不能绕过权限）', () => {
+  it('张伟传入不属于自己的订单号，拿不到该订单数据', () => {
+    // SO-2026-0428（埋雷订单，客户中科机电，ownerId=U-002 陈晓）不在张伟（U-001）名下，属于越权访问
+    const other = db.orders.find(o => o.orderNo === 'SO-2026-0428')!
+    expect(other.ownerId).not.toBe(db.users.find(u => u.name === '张伟')!.id)
+    const r: any = executeTool('simulate_delivery_risk',
+      { orderNos: ['SO-2026-0428'] }, ctxFor('张伟')).result
+    expect(r.found).toBe(false)
+    expect(typeof r.reason).toBe('string')
+  })
+  it('混合传入越权与合法订单号时，只返回权限范围内的订单，并标注被过滤数量', () => {
+    const zw = db.users.find(u => u.name === '张伟')!
+    const own = db.orders.find(o => o.ownerId === zw.id)!
+    const r: any = executeTool('simulate_delivery_risk',
+      { orderNos: [own.orderNo, 'SO-2026-0428'] }, ctxFor('张伟')).result
+    expect(r.count).toBe(1)
+    expect(r.risks[0].orderNo).toBe(own.orderNo)
+    expect(r.deniedCount).toBe(1)
+  })
+})
+
 describe('空结果不编造', () => {
   it('查不到的客户返回 found:false', () => {
     const r: any = executeTool('get_customer_detail',
