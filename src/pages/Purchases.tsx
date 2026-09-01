@@ -19,15 +19,18 @@ export default function Purchases() {
       <DataTable
         rows={rows}
         empty={scopeEmptyText(scope)}
+        searchKeys={['poNo', 'supplier']}
         columns={[
           { key: 'poNo', title: '采购单号', width: '140px' },
-          { key: 'supplier', title: '供应商', render: (r) =>
+          { key: 'supplier', title: '供应商',
+            value: (r) => db.suppliers.find(s => s.id === r.supplierId)?.name ?? '',
+            render: (r) =>
               db.suppliers.find(s => s.id === r.supplierId)?.name ?? '—' },
-          { key: 'status', title: '状态', width: '110px',
+          { key: 'status', title: '状态', width: '110px', filterable: true,
             render: (r) => <StatusChip label={r.status} tone={PO_TONE[r.status]} /> },
-          { key: 'eta', title: 'ETA', width: '130px' },
+          { key: 'eta', title: 'ETA', width: '130px', sortable: true },
           { key: 'items', title: '行项目', width: '90px', render: (r) => `${r.items.length} 项` },
-          { key: 'totalCost', title: '总成本', width: '120px', render: (r) => money(r.totalCost) },
+          { key: 'totalCost', title: '总成本', width: '120px', sortable: true, render: (r) => money(r.totalCost) },
         ]}
       />
     </div>

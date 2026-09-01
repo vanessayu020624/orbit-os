@@ -19,15 +19,18 @@ export default function Opportunities() {
       <DataTable
         rows={rows}
         empty={scopeEmptyText(scope)}
+        searchKeys={['name', 'customer']}
         columns={[
-          { key: 'name', title: '商机名', width: '180px' },
-          { key: 'customer', title: '客户', render: (r) =>
+          { key: 'name', title: '商机名', width: '180px', sortable: true },
+          { key: 'customer', title: '客户',
+            value: (r) => db.customers.find(c => c.id === r.customerId)?.name ?? '',
+            render: (r) =>
               db.customers.find(c => c.id === r.customerId)?.name ?? '—' },
-          { key: 'stage', title: '阶段', width: '110px',
+          { key: 'stage', title: '阶段', width: '110px', filterable: true,
             render: (r) => <StatusChip label={r.stage} tone={STAGE_TONE[r.stage]} /> },
-          { key: 'amount', title: '金额', width: '120px', render: (r) => money(r.amount) },
-          { key: 'probability', title: '赢率', width: '90px', render: (r) => pct(r.probability) },
-          { key: 'expectedCloseDate', title: '预计成交日', width: '130px' },
+          { key: 'amount', title: '金额', width: '120px', sortable: true, render: (r) => money(r.amount) },
+          { key: 'probability', title: '赢率', width: '90px', sortable: true, render: (r) => pct(r.probability) },
+          { key: 'expectedCloseDate', title: '预计成交日', width: '130px', sortable: true },
         ]}
       />
     </div>

@@ -13,18 +13,23 @@ export default function Inventory() {
       </div>
       <DataTable
         rows={rows}
+        searchKeys={['sku', 'name']}
         columns={[
-          { key: 'sku', title: 'SKU', width: '110px', render: (r) =>
+          { key: 'sku', title: 'SKU', width: '110px',
+            value: (r) => db.products.find(p => p.id === r.skuId)?.sku ?? '',
+            render: (r) =>
               db.products.find(p => p.id === r.skuId)?.sku ?? '—' },
-          { key: 'name', title: '品名', render: (r) =>
+          { key: 'name', title: '品名',
+            value: (r) => db.products.find(p => p.id === r.skuId)?.name ?? '',
+            render: (r) =>
               db.products.find(p => p.id === r.skuId)?.name ?? '—' },
-          { key: 'onHand', title: '在库', width: '90px' },
-          { key: 'reserved', title: '已占用', width: '90px' },
-          { key: 'available', title: '可用', width: '90px', render: (r) =>
+          { key: 'onHand', title: '在库', width: '90px', sortable: true },
+          { key: 'reserved', title: '已占用', width: '90px', sortable: true },
+          { key: 'available', title: '可用', width: '90px', sortable: true, render: (r) =>
               <span className={r.available < r.safetyStock ? 'text-danger font-semibold' : ''}>
                 {r.available}
               </span> },
-          { key: 'safetyStock', title: '安全库存', width: '100px' },
+          { key: 'safetyStock', title: '安全库存', width: '100px', sortable: true },
         ]}
       />
     </div>

@@ -15,13 +15,13 @@ export default function Customers() {
   const showFinancials = canSeeCustomerFinancials(currentUser.role)
 
   const columns = [
-    { key: 'name' as const, title: '客户名', width: '160px' },
+    { key: 'name' as const, title: '客户名', width: '160px', sortable: true },
     { key: 'industry' as const, title: '行业', width: '110px' },
-    { key: 'region' as const, title: '区域', width: '90px' },
-    { key: 'tier' as const, title: '等级', width: '90px',
+    { key: 'region' as const, title: '区域', width: '90px', filterable: true },
+    { key: 'tier' as const, title: '等级', width: '90px', filterable: true,
       render: (r: Customer) => <StatusChip label={r.tier} tone={TIER_TONE[r.tier]} /> },
     ...(showFinancials ? [
-      { key: 'annualRevenue' as const, title: '年采购额', width: '120px',
+      { key: 'annualRevenue' as const, title: '年采购额', width: '120px', sortable: true,
         render: (r: Customer) => money(r.annualRevenue) },
       { key: 'creditLimit' as const, title: '信用额度', width: '120px',
         render: (r: Customer) => money(r.creditLimit) },
@@ -40,6 +40,7 @@ export default function Customers() {
         rows={rows}
         empty={scopeEmptyText(scope)}
         columns={columns}
+        searchKeys={['name', 'industry', 'region']}
       />
     </div>
   )
