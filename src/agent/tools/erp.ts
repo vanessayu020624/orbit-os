@@ -1,6 +1,6 @@
 import type { ToolDef, Product } from '../../lib/types'
 import { TODAY } from '../../lib/types'
-import { scopeOrders, maskOrderForRole, scopeSummary, boundaryReason } from '../../lib/rbac'
+import { scopeOrders, scopePurchaseOrders, maskOrderForRole, scopeSummary, boundaryReason } from '../../lib/rbac'
 
 function findProduct(products: Product[], skuOrName: string): Product | undefined {
   return products.find(p => p.sku === skuOrName || p.name === skuOrName)
@@ -102,7 +102,9 @@ export const erpTools: ToolDef[] = [
       },
     },
     run: (a, ctx) => {
-      let rows = ctx.db.purchaseOrders
+      // 本工具的 allowedRoles 已经只放供应链与 CEO 进来，两者都看全量，走 scope 是等价的。
+      // 仍然走：数据层不该依赖工具层的门禁配置——改 allowedRoles 时数据边界要自动跟上。
+      let rows = scopePurchaseOrders(ctx.db, ctx.user)
       if (a.status) rows = rows.filter(po => po.status === a.status)
       if (a.skuFilter) {
         const p = findProduct(ctx.db.products, a.skuFilter)
