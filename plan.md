@@ -775,7 +775,9 @@ function applyPlantedScenario(db: DbSnapshot) {
     db.purchaseOrders.splice(i, 1)
   }
 
-  // 4) 供应商比选参数
+  // 4) 供应商比选参数。先把 SKU-203 从所有供应商剥离，再只发给这两家——
+  //    否则随机生成的第三家供应商可能 leadTime 更短，把「锐驰机电排第一」的断言冲掉。
+  db.suppliers.forEach(s => { s.skuIds = s.skuIds.filter(id => id !== p203.id) })
   dr.leadTimeDays = 14; dr.onTimeRate = 0.78; dr.priceFactor = 1.0
   if (!dr.skuIds.includes(p203.id)) dr.skuIds.push(p203.id)
   const rc = db.suppliers.find(s => s.name === '锐驰机电')!
@@ -786,7 +788,9 @@ function applyPlantedScenario(db: DbSnapshot) {
   const zw = db.users.find(u => u.name === '张伟')!
   const other = db.users.find(u => u.name === '周琳')!   // T2 团队，非张伟
   db.customers.forEach(c => { if (c.ownerId === zw.id) c.ownerId = other.id })
-  const mine = db.customers.slice(0, 9)
+  // 必须从下标 10 开始：前 4 个（华宁自动化/中科机电/长风精工/海通重工）分别是埋雷订单客户与
+  // 全公司最大客户，被划给张伟就会同时打破「张伟最大 86 万」和「华宁是 380 万 A 级客户」两条断言。
+  const mine = db.customers.slice(10, 19)
   mine.forEach((c, i) => {
     c.ownerId = zw.id
     c.annualRevenue = [860000, 720000, 610000, 540000, 480000, 390000, 310000, 250000, 180000][i]
@@ -1011,7 +1015,9 @@ export interface RiskCard {
 /** 首页 Agent 主动风险卡。点击后把 question 灌进 Sidekick 直接开跑。 */
 export function buildRiskCards(db: DbSnapshot, user: User): RiskCard[] {
   const cards: RiskCard[] = []
-  const horizon = new Date(Date.parse(TODAY) + 7 * DAY).toISOString().slice(0, 10)
+  // 14 天而非 7 天：埋雷的三张订单交期是 09-08/09-10/09-11，7 天窗口只能捞到第一张（它不缺货），
+  // 风险卡会永远不出现。改动此常量前先跑 risk.test.ts。
+  const horizon = new Date(Date.parse(TODAY) + 14 * DAY).toISOString().slice(0, 10)
   const pending = scopeOrders(db, user)
     .filter(o => o.status === '待发货'
               && o.promisedDeliveryDate >= TODAY && o.promisedDeliveryDate <= horizon)
@@ -1023,7 +1029,7 @@ export function buildRiskCards(db: DbSnapshot, user: User): RiskCard[] {
       id: 'RC-delivery', severity: 'high',
       title: `${risks.length} 张订单存在交期风险`,
       detail: `${sku.sku} ${sku.skuName} 缺口 ${gap} 台，最早到货 ${risks[0].incomingEta ?? '无在途'}`,
-      question: '下周要交付的订单有风险吗？帮我排查并给出处理方案。',
+      question: '未来两周要交付的订单有风险吗？帮我排查并给出处理方案。',
     })
   }
   if (user.role === 'sales_director' || user.role === 'ceo') {
@@ -1199,6 +1205,7 @@ git add -A && git commit -m "feat: 数据层、RBAC 与交期风险计算" && gi
 **Files:**
 - Create: `src/components/AppShell.tsx` `RoleSwitcher.tsx` `StatusChip.tsx` `DataTable.tsx`
 - Create: `src/pages/{Customers,Opportunities,Orders,Inventory,Purchases,Receivables}.tsx`
+- Create: `src/pages/Dashboard.tsx`（占位，P5 替换）、`public/_redirects`
 - Modify: `src/App.tsx` `src/main.tsx`
 
 **只读文件：** `STATE.md`、`src/lib/types.ts`、`src/lib/rbac.ts`、`src/lib/store.ts`、`src/lib/format.ts`
@@ -1709,7 +1716,7 @@ confirmSummary: (a, ctx) => {
 - `top_customers`：`scopeCustomers` 按 `annualRevenue` 降序，取 `limit ?? 5`
 - `order_status`：`scopeOrders` 按 status 分组计数
 
-`simulate_delivery_risk`：不传 `orderNos` 时，默认取 `scopeOrders` 中状态为「待发货」且 `promisedDeliveryDate` 在 `TODAY` 到 `TODAY + (withinDays ?? 7)` 之间的订单，再调 P1 的 `simulateDeliveryRisk(ctx.db, ids)`。这是纯本地确定性计算——面试时可讲"数值推理不交给 LLM，LLM 只决定何时调用它"。
+`simulate_delivery_risk`：不传 `orderNos` 时，默认取 `scopeOrders` 中状态为「待发货」且 `promisedDeliveryDate` 在 `TODAY` 到 `TODAY + (withinDays ?? 14)` 之间的订单（**默认必须是 14，不是 7**——埋雷订单交期最晚 09-11，7 天窗口捞不全，剧本 A 会失效），再调 P1 的 `simulateDeliveryRisk(ctx.db, ids)`。这是纯本地确定性计算——面试时可讲"数值推理不交给 LLM，LLM 只决定何时调用它"。
 
 - [ ] **Step 3.4: 写 `src/agent/tools/write.ts`（2 个）**
 
@@ -1851,7 +1858,7 @@ describe('演示剧本 C：同一问题不同角色不同答案', () => {
 
 describe('演示剧本 A：交期风险', () => {
   it('供应链主管测算出 48 台缺口', () => {
-    const r: any = executeTool('simulate_delivery_risk', { withinDays: 7 }, ctxFor('王强')).result
+    const r: any = executeTool('simulate_delivery_risk', { withinDays: 14 }, ctxFor('王强')).result
     const gap = r.risks.flatMap((x: any) => x.shortages).reduce((s: number, x: any) => s + x.gap, 0)
     expect(gap).toBe(48)
   })
@@ -2142,7 +2149,7 @@ import { useStore } from './lib/store'
 `npm run dev` 后在控制台跑：
 
 ```js
-__agent('下周要交付的订单有风险吗？帮我排查并给出处理方案。')
+__agent('未来两周要交付的订单有风险吗？帮我排查并给出处理方案。')
 ```
 
 期望：先打印一条 `plan` 事件（steps 有 3-5 条），随后若干 `tool_call` / `tool_result`，最后一条 `final`。
@@ -2413,7 +2420,7 @@ import { ConfirmCard } from './ConfirmCard'
 import { FinalAnswer } from './FinalAnswer'
 
 const PRESETS = [
-  '下周要交付的订单有风险吗？帮我排查并给出处理方案。',
+  '未来两周要交付的订单有风险吗？帮我排查并给出处理方案。',
   '公司最大的客户是谁？',
   '我这个月的商机漏斗情况怎么样？',
 ]
@@ -2427,7 +2434,8 @@ type Item =
   | { k: 'error'; text: string }
 
 export function Sidekick() {
-  const { currentUser, db, applyMutation, pushAudit } = useStore()
+  // 不要解构 db——本组件不用它，vite react-ts 模板开了 noUnusedLocals，会直接构建失败
+  const { currentUser, applyMutation, pushAudit } = useStore()
   const [items, setItems] = useState<Item[]>([])
   const [steps, setSteps] = useState<Record<string, StepState>>({})
   const [amended, setAmended] = useState<Set<string>>(new Set())
@@ -2567,7 +2575,7 @@ export function Sidekick() {
 3. 展开任一工具卡能看到 JSON 入参与出参，有耗时毫秒数
 4. 出现确认卡，文案写明"将向【锐驰机电】采购…"，点「批准执行」
 5. 最终结论里出现蓝色的 `SO-2026-0412` 之类 chip，点击跳转到订单页
-6. 切「销售代表」→ 顶部工具计数变化（按当前注册表：销售代表 9、销售总监 12、供应链主管 8、CEO 11；以实际渲染为准并记进演示脚本）→ 问"公司最大的客户是谁" → 被拒绝并给出自己名下最大客户
+6. 切「销售代表」→ 顶部工具计数变化（按当前注册表：销售代表 9、销售总监 11、供应链主管 8、CEO 11；以实际渲染为准并记进演示脚本）→ 问"公司最大的客户是谁" → 被拒绝并给出自己名下最大客户
 7. 断开网络重试 → 自动进录播模式，右上角出现角标，流程依然完整
 
 - [ ] **Step 4.10: 提交并更新 STATE.md**
@@ -2593,8 +2601,10 @@ git add -A && git commit -m "feat: AI Sidekick 界面与录播兜底" && git pus
 **预计 60 分钟。裁剪优先级最高的一期——时间紧就砍 Step 5.4。**
 
 **Files:**
+- Create: `src/lib/bus.ts`
 - Modify: `src/pages/Dashboard.tsx`（替换占位）
 - Modify: `src/lib/store.ts`（加 tick）
+- Modify: `src/sidekick/Sidekick.tsx`（订阅 bus：`useEffect(() => onAskAgent(ask), [currentUser])`）
 
 **只读文件：** `STATE.md`、`src/lib/risk.ts`、`src/lib/format.ts`、`src/components/StatusChip.tsx`
 
