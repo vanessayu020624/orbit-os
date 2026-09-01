@@ -1,29 +1,37 @@
-import { useState } from 'react'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { AppShell } from './components/AppShell'
+import Dashboard from './pages/Dashboard'
+import Customers from './pages/Customers'
+import Opportunities from './pages/Opportunities'
+import Orders from './pages/Orders'
+import Inventory from './pages/Inventory'
+import Purchases from './pages/Purchases'
+import Receivables from './pages/Receivables'
+import SelfTest from './pages/SelfTest'
 
 export default function App() {
-  const [status, setStatus] = useState('未测试')
-  async function ping() {
-    setStatus('请求中…')
-    try {
-      const r = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'glm-4.5-flash',
-          messages: [{ role: 'user', content: '只回复两个字：连通' }],
-        }),
-      })
-      const j = await r.json()
-      setStatus(j?.choices?.[0]?.message?.content ?? `HTTP ${r.status}: ${JSON.stringify(j).slice(0, 200)}`)
-    } catch (e) {
-      setStatus('失败：' + String(e))
-    }
-  }
   return (
-    <div className="p-10 space-y-4">
-      <h1 className="text-2xl font-bold text-brand">OrbitOS 部署自检</h1>
-      <button onClick={ping} className="px-4 py-2 rounded bg-brand text-white">测试 /api/chat</button>
-      <pre className="p-3 bg-white rounded border text-sm whitespace-pre-wrap">{status}</pre>
-    </div>
+    <BrowserRouter>
+      <Routes>
+        {/* /selftest 独立于业务外壳之外：P0 部署连通性验证，不进左侧导航（见 Ruling T2-A） */}
+        <Route path="/selftest" element={<SelfTest />} />
+        <Route
+          path="/*"
+          element={
+            <AppShell>
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/customers" element={<Customers />} />
+                <Route path="/opportunities" element={<Opportunities />} />
+                <Route path="/orders" element={<Orders />} />
+                <Route path="/inventory" element={<Inventory />} />
+                <Route path="/purchases" element={<Purchases />} />
+                <Route path="/receivables" element={<Receivables />} />
+              </Routes>
+            </AppShell>
+          }
+        />
+      </Routes>
+    </BrowserRouter>
   )
 }

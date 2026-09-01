@@ -21,3 +21,12 @@
   applyPlantedScenario 里用 `db.products.find(sku==='SKU-203') ?? db.products[2]` 兜底改号后再覆盖字段
 - ⚠️ 坑（brief 里没写）：过滤已有「在途」采购单时可能删掉不止 1 条，原 while 循环只处理超编不处理
   缺编，已加补齐逻辑把 purchaseOrders 数量稳定钉回 55
+
+## P2 完成 (2026-09-02)
+- AppShell 接受 sidekick prop，右侧 420px 槽位待 P4 填充
+- StatusChip({label, tone}) + 导出 ORDER_TONE/PO_TONE/STAGE_TONE/AR_TONE 映射表
+- DataTable({columns: Column[], rows, empty})，Column = {key,title,width?,render?}
+- 6 个列表页已按角色过滤，空态文案是权限的可见证明
+- public/_redirects 已加 SPA 回退，否则 Pages 上刷新子路由 404
+- Ruling T2-A：P0 自检页原样迁到 src/pages/SelfTest.tsx，路由 /selftest 挂在 AppShell 之外（未入导航）
+- ⚠️ 坑：react-router-dom 7.18 仍导出 BrowserRouter/Routes/Route/NavLink，brief 的 R6 风格写法无需改动即可用
