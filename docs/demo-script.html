@@ -1,0 +1,927 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OrbitOS 现场演示脚本</title>
+<style>
+:root {
+  --ink:#1b2430; --ink-2:#4a5768; --ink-3:#8593a5; --line:#e3e6ec;
+  --paper:#ffffff; --wash:#f6f7f9; --brand:#0073ea; --ok:#00a35c;
+  --warn:#c97a10; --danger:#d43b52; --purple:#7c4dc4;
+}
+* { box-sizing:border-box; }
+html { -webkit-text-size-adjust:100%; }
+body {
+  margin:0; background:var(--wash); color:var(--ink);
+  font:15px/1.85 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif;
+}
+code, .mono { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace; }
+
+/* ---------- 页头 ---------- */
+.hero { background:linear-gradient(150deg,#0b1b2e,#123a63 55%,#0e5aa7); color:#fff; padding:44px 0 34px; }
+.hero .in { max-width:1180px; margin:0 auto; padding:0 28px; }
+.hero h1 { margin:0; font-size:30px; letter-spacing:.4px; font-weight:700; }
+.hero p { margin:10px 0 0; color:#bcd4ee; font-size:14px; max-width:70ch; line-height:1.8; }
+.chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:22px; }
+.chip { background:rgba(255,255,255,.10); border:1px solid rgba(255,255,255,.18);
+  border-radius:9px; padding:8px 12px; min-width:132px; }
+.chip b { display:block; font-size:13px; }
+.chip span { display:block; font-size:11.5px; color:#a9c6e6; margin-top:1px; }
+.chip i { display:block; font-style:normal; font-size:11px; color:#7fd3ff; margin-top:4px; }
+.chip.c-a { border-left:3px solid #4ea3ff; } .chip.c-b { border-left:3px solid #b58bff; }
+.chip.c-c { border-left:3px solid #4be0a5; } .chip.c-d { border-left:3px solid #ffd166; }
+.chip.c-e { border-left:3px solid #ff8a7a; } .chip.c-x { border-left:3px solid #9fb2c8; }
+
+/* ---------- 骨架 ---------- */
+.wrap { max-width:1180px; margin:0 auto; padding:26px 28px 80px; display:grid;
+  grid-template-columns:236px minmax(0,1fr); gap:32px; align-items:start; }
+nav.toc { position:sticky; top:20px; max-height:calc(100vh - 40px); overflow:auto;
+  font-size:12.5px; line-height:1.6; }
+nav.toc .toc > ul { list-style:none; margin:0; padding:0; }
+nav.toc h4 { margin:0 0 8px; padding-left:6px; font-size:11px; letter-spacing:1.5px;
+  color:var(--ink-3); font-weight:600; }
+nav.toc ul ul { list-style:none; margin:2px 0 6px; padding-left:11px; border-left:1px solid var(--line); }
+nav.toc li { margin:3px 0; }
+nav.toc a { color:var(--ink-2); text-decoration:none; display:block; padding:2px 6px; border-radius:5px; }
+nav.toc a:hover { background:#eaf2fd; color:var(--brand); }
+nav.toc .toc > ul > li > a { color:var(--ink); font-weight:600; }
+main { background:var(--paper); border:1px solid var(--line); border-radius:14px;
+  padding:14px 40px 46px; box-shadow:0 1px 2px rgba(16,32,56,.05); min-width:0; }
+
+/* ---------- 正文 ---------- */
+h2 { font-size:21px; margin:46px 0 14px; padding-top:22px; border-top:1px solid var(--line);
+  letter-spacing:.2px; scroll-margin-top:16px; }
+h2:first-of-type { border-top:0; margin-top:26px; padding-top:0; }
+h3 { font-size:16px; margin:30px 0 10px; color:#12325a; scroll-margin-top:16px; }
+p { margin:11px 0; }
+strong { color:#0d2b52; font-weight:650; }
+hr { display:none; }
+a { color:var(--brand); }
+ul, ol { padding-left:22px; margin:10px 0; }
+li { margin:5px 0; }
+code { background:#f1f3f7; border:1px solid #e4e8ef; border-radius:4px;
+  padding:1px 5px; font-size:12.5px; color:#2b3a55; }
+code.ref { background:#e8f2ff; border-color:#c9e0fb; color:var(--brand); }
+blockquote { margin:10px 0; padding:2px 0 2px 15px; border-left:3px solid #dfe4ec; color:var(--ink-2); }
+blockquote p { margin:7px 0; }
+
+/* ---------- 四类段落 ---------- */
+.block { position:relative; margin:16px 0; padding:14px 18px 14px 17px;
+  border-radius:10px; border:1px solid var(--line); background:#fcfdff; }
+.block > :first-child { margin-top:0; }
+.block > :last-child { margin-bottom:0; }
+/* 角标独占一个 <p>（markdown 生成的），把这个 p 整个抬到边框上，别让它在流里占一行高。
+   浏览器不认 :has() 时会退化成框内第一行的一枚小标签——不好看，但不影响读。 */
+.block > p:has(> .tag) { position:absolute; top:-9px; left:14px; margin:0; line-height:1; }
+.block > p:has(> .tag) + * { margin-top:0; }
+.block .tag { display:inline-block; font-size:10.5px; letter-spacing:1px;
+  padding:1px 8px; border-radius:20px; background:#fff; border:1px solid var(--line); color:var(--ink-3); }
+.block.act { border-left:3px solid var(--brand); background:#f7fbff; }
+.block.act .tag { color:var(--brand); border-color:#c9e0fb; }
+.block.say { border-left:3px solid var(--purple); background:#faf8ff; }
+.block.say .tag { color:var(--purple); border-color:#e0d3f7; }
+.block.say blockquote { border-left-color:#d9c9f5; color:#33265a; font-size:15.5px; }
+.block.screen { border-left:3px solid var(--ok); background:#f6fbf8; }
+.block.screen .tag { color:var(--ok); border-color:#c4e8d6; }
+.block.stuck { border-left:3px solid var(--warn); background:#fffbf3; }
+.block.stuck .tag { color:var(--warn); border-color:#f0dcbb; }
+.block.note { border-left:3px solid #b9c2d0; background:#fafbfc; }
+
+/* ---------- 表格 ---------- */
+.tw { overflow-x:auto; margin:16px 0; border:1px solid var(--line); border-radius:10px; }
+table { border-collapse:collapse; width:100%; font-size:13.5px; }
+th, td { padding:9px 12px; border-top:1px solid var(--line); text-align:left; vertical-align:top; }
+th { background:#f4f6f9; border-top:0; font-weight:650; color:#26364e; white-space:nowrap; }
+tbody tr:nth-child(even) { background:#fbfcfd; }
+td:first-child { color:#26364e; }
+/* 附录全表用空的首列表示「同一个角色的下一条」，这里把这类行的上边框淡掉，读起来是一组。 */
+tr:has(td:first-child:empty) td { border-top-color:#f1f3f6; }
+
+/* ---------- 打印 ---------- */
+@media print {
+  body { background:#fff; font-size:11pt; }
+  .hero { background:#0b1b2e !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .wrap { display:block; max-width:none; padding:0; }
+  nav.toc { display:none; }
+  main { border:0; border-radius:0; box-shadow:none; padding:0 6mm; }
+  h2 { break-before:page; } h2:first-of-type { break-before:auto; }
+  .block, .tw, tr { break-inside:avoid; }
+  .block { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+}
+@media (max-width:900px) {
+  .wrap { grid-template-columns:minmax(0,1fr); }
+  nav.toc { position:static; max-height:none; order:2; }
+  main { padding:10px 20px 30px; }
+}
+</style>
+</head>
+<body>
+<header class="hero"><div class="in">
+  <h1>OrbitOS 现场演示脚本</h1>
+  <p>五个剧本 + 13 条预置问题全表。屏幕上出现的每一个数字都来自 <code class="mono">generateSeed(42)</code> 的确定性种子，每次演示完全一致。台词是逐句写的，但不要背——写下来是为了保证该说的三件事一件不漏。</p>
+  <div class="chips"><div class="chip c-a"><b>剧本 A</b><span>交期风险穿透排查</span><i>4 min</i></div>
+<div class="chip c-b"><b>剧本 B</b><span>两张聚合分析</span><i>1.5 min</i></div>
+<div class="chip c-c"><b>剧本 C</b><span>同问题不同角色</span><i>2 min</i></div>
+<div class="chip c-d"><b>剧本 D</b><span>追问链与记忆</span><i>1 min</i></div>
+<div class="chip c-e"><b>剧本 E</b><span>歧义先消解</span><i>1 min</i></div>
+<div class="chip c-x"><b>收尾</b><span>三句话收束</span><i>0.5 min</i></div></div>
+</div></header>
+<div class="wrap">
+  <nav class="toc"><h4>目录</h4><div class="toc">
+<ul>
+<li><a href="#开场前-60-秒不计入演示时间">开场前 60 秒（不计入演示时间）</a></li>
+<li><a href="#剧本-a-交期风险穿透排查约-4-分钟">剧本 A · 交期风险穿透排查（约 4 分钟）</a><ul>
+<li><a href="#a-1-开场agent-主动来找人约-30-秒">A-1 开场：Agent 主动来找人（约 30 秒）</a></li>
+<li><a href="#a-2-提问与规划让-agent-先说它要干什么约-45-秒">A-2 提问与规划：让 Agent 先说它要干什么（约 45 秒）</a></li>
+<li><a href="#a-3-执行过程全部摊开给人看约-60-秒">A-3 执行：过程全部摊开给人看（约 60 秒）</a></li>
+<li><a href="#a-4-hitl把决策权还给人连同做决策要的数字约-60-秒">A-4 HITL：把决策权还给人，连同做决策要的数字（约 60 秒）</a></li>
+<li><a href="#a-5-闭环agent-干预的结果当场反映在看板上约-30-秒">A-5 闭环：Agent 干预的结果当场反映在看板上（约 30 秒）</a></li>
+</ul>
+</li>
+<li><a href="#剧本-b-一句话跑两张聚合分析约-15-分钟可选">剧本 B · 一句话跑两张聚合分析（约 1.5 分钟，可选）</a><ul>
+<li><a href="#b-1-营收-漏斗一句话两个口径约-50-秒">B-1 营收 + 漏斗：一句话，两个口径（约 50 秒）</a></li>
+<li><a href="#b-2-逾期应收同一个人另一个模块约-40-秒">B-2 逾期应收：同一个人，另一个模块（约 40 秒）</a></li>
+</ul>
+</li>
+<li><a href="#剧本-c-同一个问题不同角色不同答案约-2-分钟">剧本 C · 同一个问题，不同角色不同答案（约 2 分钟）</a><ul>
+<li><a href="#c-1-销售代表问约-50-秒">C-1 销售代表问（约 50 秒）</a></li>
+<li><a href="#c-2-ceo-问同一句约-50-秒">C-2 CEO 问同一句（约 50 秒）</a></li>
+</ul>
+</li>
+<li><a href="#剧本-d-追问链与记忆边界约-1-分钟可选">剧本 D · 追问链与记忆边界（约 1 分钟，可选）</a></li>
+<li><a href="#剧本-e-歧义先消解再执行约-1-分钟">剧本 E · 歧义先消解，再执行（约 1 分钟）</a></li>
+<li><a href="#收尾约-30-秒">收尾（约 30 秒）</a></li>
+<li><a href="#附录-四个角色-三个场景13-条预置问题全表">附录 · 四个角色 × 三个场景：13 条预置问题全表</a></li>
+<li><a href="#两个不在主线剧本里但值得主动提的点">两个不在主线剧本里、但值得主动提的点</a><ul>
+<li><a href="#一agent-走出系统飞书">一、Agent 走出系统：飞书</a></li>
+<li><a href="#二手机上是另一个产品形态不是桌面版的窄版本">二、手机上是另一个产品形态，不是桌面版的窄版本</a></li>
+</ul>
+</li>
+<li><a href="#模型挂了怎么说">模型挂了怎么说</a></li>
+<li><a href="#面试官可能追问的-10-个问题及回答要点">面试官可能追问的 10 个问题及回答要点</a></li>
+</ul>
+</div>
+</nav>
+  <main>
+<blockquote>
+<p>主线约 7 分钟（剧本 A 约 4 分钟 + 剧本 C 约 2 分钟 + 收尾 1 分钟）。时间够就加：剧本 B（聚合分析，约 1.5 分钟）、剧本 D（追问链与记忆边界，约 1 分钟）、剧本 E（歧义澄清，约 1 分钟）。
+<strong>只加得下一个的话选 E</strong>：它是全场唯一一个「Agent 停下来不答」的时刻，比多演一次成功链路更容易被记住。
+五个剧本演到的是 13 条预置问题里的 6 条；剩下 7 条会不会被面试官临场点开，你控制不了，所以文末附了一张<strong>全表</strong>，写清每一条会调什么工具、屏幕上出什么数字。
+台词是逐句写的，但不要背——写下来是为了保证<strong>该说的三件事一件不漏</strong>：Agent 自主规划、权限是真约束、人机协同闭环。
+屏幕上出现的所有数字都在下文标粗，它们来自 <code>generateSeed(42)</code> 的确定性种子，每次演示完全一致。</p>
+</blockquote>
+<hr />
+<h2 id="开场前-60-秒不计入演示时间">开场前 60 秒（不计入演示时间）</h2>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>检查项</th>
+<th>怎么做</th>
+<th>不对怎么办</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>页面能开</td>
+<td>打开 <a href="https://orbit-os.pages.dev">https://orbit-os.pages.dev</a></td>
+<td>打不开先试 <a href="https://orbit-os.pages.dev/selftest">https://orbit-os.pages.dev/selftest</a>（自检页，不依赖业务代码）；再不行切本地 <code>npx wrangler pages dev dist</code>（<code>npm run dev</code> 不起 Pages Function，模型调不通）</td>
+</tr>
+<tr>
+<td>角色是「供应链主管」</td>
+<td>顶栏中间的角色切换器，默认就是它</td>
+<td>点一下「供应链主管」</td>
+</tr>
+<tr>
+<td>首页有红色风险卡</td>
+<td>卡片标题应为「<strong>2 张订单存在交期风险</strong>」</td>
+<td>没有就点右上角「<strong>重置演示数据</strong>」，数据回到初始态</td>
+</tr>
+<tr>
+<td>Sidekick 干净</td>
+<td>右侧应显示空态引导语</td>
+<td>刷新页面</td>
+</tr>
+<tr>
+<td>模型能通</td>
+<td>先随便问一句「SKU-203 库存够不够」，能出计划卡和结论</td>
+<td>出失败卡就见文末「模型挂了怎么说」，别硬演</td>
+</tr>
+<tr>
+<td>窗口够宽</td>
+<td>≥ 1440px，浏览器缩放 100%</td>
+<td>右侧 Sidekick 固定 380px（结论展开时 560px），窄了会挤压主区。<strong>768~1023px 会换成一张说明卡</strong>——刻意做的，不是崩了，卡上有「仍要继续」可以放行；<strong>低于 768px 会直接切到移动版</strong>（另一套界面，见文末第二点）</td>
+</tr>
+<tr>
+<td>手机备好（可选）</td>
+<td>手机浏览器打开同一个地址，先问一句确认能通</td>
+<td>只在被问到移动端时掏出来。不通就照旧口头讲，别现场调</td>
+</tr>
+</tbody>
+</table></div>
+<hr />
+<h2 id="剧本-a-交期风险穿透排查约-4-分钟">剧本 A · 交期风险穿透排查（约 4 分钟）</h2>
+<p><strong>角色：供应链主管 王强　场景：他每天早上第一件事</strong></p>
+<h3 id="a-1-开场agent-主动来找人约-30-秒">A-1　开场：Agent 主动来找人（约 30 秒）</h3>
+<div class="block say">
+<p><span class="tag">说</span></p>
+<blockquote>
+<p>这是「擎源工业设备」，一家工业设备的 B2B 分销商。我现在的身份是供应链主管王强。
+请注意，我<strong>还没有提任何问题</strong>——首页顶部这张红卡是 Agent 自己算出来的。</p>
+</blockquote>
+</div>
+<div class="block act">
+<p><span class="tag">做</span></p>
+<p>光标指向首页顶部的红色风险卡。</p>
+</div>
+<div class="block screen">
+<p><span class="tag">屏幕上会出现</span></p>
+<ul>
+<li>红色竖条 + 「高风险」标签 + 标题「<strong>2 张订单存在交期风险</strong>」</li>
+<li>副标题「<strong>SKU-203 高精度伺服电机 SV-800 缺口 48 台，当前最早可到货 2026-09-16</strong>」</li>
+<li>右侧按钮「让 Agent 排查 →」</li>
+</ul>
+</div>
+<div class="block say">
+<p><span class="tag">说</span></p>
+<blockquote>
+<p>下面四张 KPI 里，第三张「交期风险订单」是 <strong>2</strong>，和卡片是同一个口径的同一个数——不是两套算法凑出来的巧合。
+另外注意第一张「本月营收」显示的是 <code>***</code>，第四张「逾期应收」显示的是「仅销售总监 / CEO 可见」。<strong>供应链主管能看全公司的订单，但看不到金额</strong>——这是字段级脱敏，后面讲权限时会回来说它。</p>
+</blockquote>
+</div>
+<div class="block stuck">
+<p><span class="tag">卡住了怎么办</span></p>
+<ul>
+<li>没有红卡 → 角色不对（切到供应链主管），或数据已被上一次演示改过（点「重置演示数据」）。</li>
+<li>KPI「待发货订单」的数字在变 → 正常，看板每 4 秒推进一条模拟业务事件。<strong>「交期风险订单」不会自己变</strong>，埋雷订单被排除在 tick 之外。</li>
+</ul>
+</div>
+<h3 id="a-2-提问与规划让-agent-先说它要干什么约-45-秒">A-2　提问与规划：让 Agent 先说它要干什么（约 45 秒）</h3>
+<div class="block say">
+<p><span class="tag">说</span></p>
+<blockquote>
+<p>我点这个「让 Agent 排查」，它会把一句话灌进右边的 Sidekick 直接开跑，现场不用打字。</p>
+</blockquote>
+</div>
+<div class="block act">
+<p><span class="tag">做</span></p>
+<p>点风险卡右侧的「<strong>让 Agent 排查 →</strong>」。</p>
+</div>
+<div class="block screen">
+<p><span class="tag">屏幕上会出现（右侧 Sidekick）</span></p>
+<ol>
+<li>顶部状态行「<strong>王强 · 供应链主管 · 可用工具 10 个 / 共 15 个</strong>」</li>
+<li>蓝色气泡里的问题：「未来两周要交付的订单有风险吗？帮我排查并给出处理方案。」</li>
+<li>短暂等待后，一份<strong>带勾选框的计划清单</strong>：一句 <code>goal</code> + 3～6 条步骤</li>
+</ol>
+</div>
+<div class="block say">
+<p><span class="tag">说（等计划出来的时候说，别冷场）</span></p>
+<blockquote>
+<p>这里有个刻意的设计。它不是拿到问题就闷头调工具，而是先出一份计划，我在<strong>任何工具跑起来之前</strong>就知道它打算查哪几件事。
+用的是 Planner–Executor 双层结构：先一次调用产出结构化的 JSON 计划，界面直接渲染成这张清单，然后才进入执行循环。
+代价是多了一轮模型调用、多了一点首屏延迟。我认为值——<strong>用户不知道要等多久的等待，比真实时长更难熬；而且看不见计划，就没有中途打断的机会。</strong></p>
+</blockquote>
+</div>
+<div class="block stuck">
+<p><span class="tag">卡住了怎么办</span></p>
+<ul>
+<li>计划迟迟不出来（&gt;10 秒）→ 边等边讲上面那段设计理由，它本来就是要讲的。</li>
+<li>出来的步骤和你预想的不一样（比如 4 步变 5 步）→ <strong>不要纠正，直接承认</strong>：「每次规划都可能不同，这是模型不是脚本」。这句话本身就是可信度。</li>
+<li>蹦出失败卡（超时/限流/断网）→ 见文末「模型挂了怎么说」，点卡片上的「重新问一次」。</li>
+</ul>
+</div>
+<h3 id="a-3-执行过程全部摊开给人看约-60-秒">A-3　执行：过程全部摊开给人看（约 60 秒）</h3>
+<div class="block act">
+<p><span class="tag">做</span></p>
+<p>让它自己跑，同时点开其中一张工具卡（点卡片标题即可展开）。</p>
+</div>
+<div class="block screen">
+<p><span class="tag">屏幕上会出现</span></p>
+<ul>
+<li>计划清单逐条打勾，当前步骤转圈</li>
+<li>每步下面一张或多张工具调用卡，标题是工具名（<code>simulate_delivery_risk</code>、<code>get_supplier_options</code> …），右上角有耗时（个位数毫秒）</li>
+<li>展开后是「入参 / 出参」两段 JSON</li>
+</ul>
+</div>
+<p><strong>说（指着展开的 <code>simulate_delivery_risk</code> 出参）：</strong></p>
+<blockquote>
+<p>这是关键的一步。出参里能看到 <strong>SO-2026-0428 缺 28 台、SO-2026-0435 缺 20 台，合计 48 台</strong>，还有在途采购单的最早到货日 <strong>2026-09-16</strong>，比这两张订单的交期分别晚 <strong>6 天和 5 天</strong>。</p>
+<p>这个 <code>simulate_delivery_risk</code> 是本地的确定性计算，<strong>不是让模型算的</strong>。为什么？因为库存不能被重复分配——42 台可用库存，第一张订单要 40 台，剩下的只有 2 台，第二张要 30 台就缺 28。
+如果我把这件事拆成「查订单」「查库存」两个工具再让模型自己做减法，它最自然的做法是拿每张订单分别和 42 比一下——40 小于 42、30 小于 42、20 小于 42，<strong>结论是三张订单都没风险</strong>。这个答案的每一步都对，方向完全错。</p>
+<p>所以边界画在这儿：<strong>模型决定什么时候该测算，代码决定怎么算。</strong> 判断交给模型，规则交给代码。</p>
+</blockquote>
+<div class="block stuck">
+<p><span class="tag">卡住了怎么办</span></p>
+<ul>
+<li>工具卡默认折叠，记得点标题展开。</li>
+<li>模型多调了一两个工具（比如先 <code>query_sales_orders</code> 再测算）→ 完全正常，顺势说「过程是可见的，多调了一步你也能看见，这正是把过程摊开的价值」。</li>
+<li>出参 JSON 很长要滚动 → 展开区高度有限，滚到 <code>"gap": 28</code> 那几行停住再讲。</li>
+</ul>
+</div>
+<h3 id="a-4-hitl把决策权还给人连同做决策要的数字约-60-秒">A-4　HITL：把决策权还给人，连同做决策要的数字（约 60 秒）</h3>
+<div class="block screen">
+<p><span class="tag">屏幕上会出现</span></p>
+<p>一张<strong>黄色边框</strong>的卡片，左上角「需要你确认」+ 灰色小字 <code>create_purchase_order</code>，正文：</p>
+<blockquote>
+<p><strong>将向【锐驰机电】采购 SKU-203 高精度伺服电机 SV-800 × 48 台，预计成本 ¥591,360，预计到货 2026-09-07（加急）</strong></p>
+</blockquote>
+</div>
+<p>底部两个按钮：「批准执行」「拒绝」。</p>
+<div class="block say">
+<p><span class="tag">说（先不点）</span></p>
+<blockquote>
+<p>它停下来了。所有写操作——下采购单、改交期、锁库存、建任务，一共 4 个——都会在执行前被拦住。</p>
+<p>我想让你看这张卡的<strong>文案</strong>。它不是「确认执行吗」，而是把供应商、型号、数量、金额、到货日全写出来了。
+因为「确认执行吗」等于把决策权还给了人，却没把做决策要的信息一起还给人——人只能无脑点确定，那 HITL 就白做了。</p>
+<p>还有一个更重要的点：<strong>这段文案是代码用当前数据库算出来的，不是模型写的。</strong> 模型只给了四个参数：供应商名、SKU、数量、加急标志；¥591,360 是拿成本单价乘价格系数再乘数量算的，2026-09-07 是拿今天加上加急后的交期算的。
+如果这段话来自模型的自然语言输出，那模型幻觉出来的价格就会<strong>被确认流程洗白成事实</strong>——用户看着一个假数字点了批准。<strong>确认卡必须由系统生成，不能由被审查的对象生成。</strong></p>
+</blockquote>
+</div>
+<div class="block act">
+<p><span class="tag">做</span></p>
+<p>点「<strong>批准执行</strong>」。</p>
+</div>
+<div class="block screen">
+<p><span class="tag">屏幕上会出现</span></p>
+<ul>
+<li>卡片变绿，显示「✓ 已批准并执行」</li>
+<li>工具卡出现执行结果（新采购单号、ETA）</li>
+<li>结论段落，其中 <code>&lt;code class="ref"&gt;SO-2026-0428&lt;/code&gt;</code>、<code>&lt;code class="ref"&gt;SKU-203&lt;/code&gt;</code>、<code>&lt;code class="ref"&gt;PO-2026-955&lt;/code&gt;</code> 是<strong>蓝色可点击的 chip</strong></li>
+</ul>
+</div>
+<div class="block say">
+<p><span class="tag">说</span></p>
+<blockquote>
+<p>结论里每一个记录号都是可点的，点一下跳到原始记录页去核对。<strong>可验证性比准确性更重要</strong>——一个 95% 准确但没法验证的系统，企业不敢用；90% 准确但每条都能一键核对的，能用。</p>
+</blockquote>
+</div>
+<p><strong>（可选，10 秒）</strong> 点一下 <code>&lt;code class="ref"&gt;SO-2026-0428&lt;/code&gt;</code> chip 跳到订单页，再退回来。</p>
+<div class="block stuck">
+<p><span class="tag">卡住了怎么办</span></p>
+<ul>
+<li><strong>确认卡没弹出来</strong>（模型只分析没下单）→ 直接在输入框打字：<code>向锐驰机电加急采购 48 台 SKU-203</code>，回车，卡片就会出现。</li>
+<li>模型下单数量不是 48（比如它写了 50）→ 这是好素材：「你看，这正是为什么要人来确认——我现在会点拒绝」。点「拒绝」，接 A-5。</li>
+<li>结论里的 chip 没渲染成蓝色按钮 → 模型这次没加 <code>[[]]</code> 标记。承认它：「这是靠 prompt 约束的，不是 100% 稳定，所以我在设计文档里把『校验 chip 指向的记录是否真实存在』列为已知缺口」。</li>
+</ul>
+</div>
+<h3 id="a-5-闭环agent-干预的结果当场反映在看板上约-30-秒">A-5　闭环：Agent 干预的结果当场反映在看板上（约 30 秒）</h3>
+<div class="block act">
+<p><span class="tag">做</span></p>
+<p>点左侧导航「<strong>仪表盘</strong>」（如果刚才点 chip 跳走了就点回来）。</p>
+</div>
+<div class="block screen">
+<p><span class="tag">屏幕上会出现</span></p>
+<ul>
+<li><strong>红色风险卡消失了</strong></li>
+<li>KPI「交期风险订单」从 <strong>2</strong> 变成 <strong>0</strong></li>
+</ul>
+</div>
+<div class="block say">
+<p><span class="tag">说</span></p>
+<blockquote>
+<p>采购单真的写进了数据层，可用库存补足，风险重新算过，卡片和 KPI 一起归零。
+这一步是整个演示的目的：<strong>Agent 不是一个会说话的报表，它的输出会改变系统状态，而且改变是当场可见的。</strong></p>
+</blockquote>
+</div>
+<div class="block note">
+<p><strong>如果刚才点了「拒绝」，改说：</strong></p>
+<blockquote>
+<p>我拒绝之后，它没有重试——重试会给我弹一张一模一样的卡，那是系统在跟用户较劲。
+它改口给了替代方案：跟客户协商交期顺延。因为拒绝这件事被当成一条工具结果喂回了模型，附带一句「请据此调整建议，不要重复尝试」。
+顺便说，<strong>拒绝率是我盯的核心产品指标</strong>——拒绝率高不代表安全机制在起作用，代表 Agent 的建议质量差。</p>
+</blockquote>
+</div>
+<hr />
+<h2 id="剧本-b-一句话跑两张聚合分析约-15-分钟可选">剧本 B · 一句话跑两张聚合分析（约 1.5 分钟，可选）</h2>
+<p><strong>角色：销售总监 李娜　场景：周会前十分钟</strong></p>
+<p><strong>目的：证明它不只是个查明细的。一句自然语言里含着两个不同口径的聚合请求，它自己拆成两次调用；而这两个数字和左边看板同源。</strong></p>
+<h3 id="b-1-营收-漏斗一句话两个口径约-50-秒">B-1　营收 + 漏斗：一句话，两个口径（约 50 秒）</h3>
+<div class="block act">
+<p><span class="tag">做</span></p>
+<p>顶栏切「<strong>销售总监</strong>」，点底部<strong>第二个</strong>预置问题「<strong>本月团队的营收和商机漏斗怎么样？</strong>」。</p>
+</div>
+<div class="block screen">
+<p><span class="tag">屏幕上会出现</span></p>
+<ul>
+<li>计划两步：先算营收，再拉漏斗</li>
+<li>两张工具卡，都是 <code>aggregate_metrics</code>，参数分别是 <code>{"metric":"revenue"}</code> 和 <code>{"metric":"funnel"}</code></li>
+<li>结论：团队营收 <strong>¥2,566.9 万</strong>（<strong>31</strong> 张已发货 / 已完成订单）；漏斗共 <strong>50</strong> 个商机——线索确认 5 单 <strong>¥443.0 万</strong> / 需求分析 10 单 <strong>¥1,144.0 万</strong> / 方案报价 12 单 <strong>¥1,033.0 万</strong> / 商务谈判 5 单 <strong>¥452.0 万</strong> / 赢单 9 单 <strong>¥601.0 万</strong> / 输单 9 单 <strong>¥1,230.0 万</strong></li>
+</ul>
+</div>
+<div class="block say">
+<p><span class="tag">说</span></p>
+<blockquote>
+<p>这句话里其实是两个问题、两个口径。它没有含混地答一段，是拆成了两次调用——<code>metric</code> 在工具定义里是个<strong>枚举</strong>，四个口径写死了，模型只能挑一个，造不出「本月加权预测」这种系统里根本不存在的口径。
+再指一下左边看板的销售漏斗图：<strong>这张图和它刚才那段结论走的是同一个 <code>scopeOpportunities</code></strong>。看板和 Agent 不是两套各算各的统计。这也正是我不让模型自己拿明细做加总、而是给它一个聚合工具的原因——<strong>同一个数字在系统里只能有一个来源</strong>，否则面试官只要交叉核对两个屏幕就能把演示打穿。
+还有一句我会自己先说清楚：这里的营收是「已发货 + 已完成订单的金额合计」，不是签约额也不是回款额；漏斗是<strong>当前在库商机的阶段分布</strong>，不是本月新增。口径写在工具描述里，模型答的时候会带出来。聚合类问题最容易被追问的从来不是数值，是口径。</p>
+</blockquote>
+</div>
+<h3 id="b-2-逾期应收同一个人另一个模块约-40-秒">B-2　逾期应收：同一个人，另一个模块（约 40 秒）</h3>
+<div class="block act">
+<p><span class="tag">做</span></p>
+<p>点<strong>第一个</strong>预置问题「<strong>团队里逾期超过 30 天的应收有哪些？</strong>」。</p>
+</div>
+<div class="block screen">
+<p><span class="tag">屏幕上会出现</span></p>
+<p>工具卡 <code>query_receivables</code>，参数带 <code>overdueDaysMin: 30</code>；结论是一份逾期清单，<strong>未收回合计 ¥998.3 万</strong>，最长的一笔是 <strong><code class="ref">AR-002</code> 中科机电，逾期 89 天、¥31.2 万</strong>。</p>
+</div>
+<div class="block act">
+<p><span class="tag">做</span></p>
+<p>点结论里的 <strong><code class="ref">AR-002</code></strong>，跳到应收页并高亮那一行。</p>
+</div>
+<div class="block say">
+<p><span class="tag">说</span></p>
+<blockquote>
+<p>结论里每个编号都是可点的，点过去就是数据页里的同一条记录，不用人自己去搜。这条链路上有一道硬约束：结论里引用的编号会被逐个拿回数据库核对，核不上的直接<strong>标红划掉</strong>，不允许它安静地长得像个正常链接——那正是我在实测里踩到过的最伤信任的一种失败。</p>
+</blockquote>
+</div>
+<div class="block stuck">
+<p><span class="tag">卡住了怎么办</span></p>
+<ul>
+<li>清单条数可能是 <strong>11</strong> 笔，也可能是 <strong>26</strong> 笔，取决于模型有没有同时带上 <code>status: 已逾期</code>——不带的话，那些当初逾期过、现在已经回款的单子也会被算进来。<strong>未收回金额两种口径下都是 ¥998.3 万</strong>（已回款的未结余额是 0）。被问到就照实讲，这恰好是「聚合结论必须自带口径」的现成例子。</li>
+<li>想顺带演权限对照 → 同样这两句话，换成销售代表张伟：问漏斗他只能拿到自己名下 <strong>18</strong> 个商机的明细（<code>aggregate_metrics</code> 不在他的工具集里），问应收直接撞边界（应收工具只对销售总监和 CEO 开放）。</li>
+</ul>
+</div>
+<hr />
+<h2 id="剧本-c-同一个问题不同角色不同答案约-2-分钟">剧本 C · 同一个问题，不同角色不同答案（约 2 分钟）</h2>
+<p><strong>目的：证明权限不是 UI 隐藏，是 Agent 物理上够不着。</strong></p>
+<h3 id="c-1-销售代表问约-50-秒">C-1　销售代表问（约 50 秒）</h3>
+<div class="block act">
+<p><span class="tag">做</span></p>
+<p>顶栏角色切换器点「<strong>销售代表</strong>」。</p>
+</div>
+<div class="block say">
+<p><span class="tag">说</span></p>
+<blockquote>
+<p>现在我是销售代表张伟。先看右上角 Sidekick 顶部这一行——「<strong>可用工具 9 个</strong>」，刚才王强是 <strong>10 个</strong>，全系统一共 15 个。<strong>不同角色拿到的是不同的工具集合，不是同一套工具加了个开关。</strong></p>
+</blockquote>
+</div>
+<div class="block act">
+<p><span class="tag">做</span></p>
+<p>在 Sidekick 输入框打「<strong>公司最大的客户是谁？</strong>」，回车。（销售代表底部没有这条预设，得手打；CEO 那边它是第一个预设按钮。）</p>
+</div>
+<p><strong>先出现的不是计划卡，是一张澄清卡</strong>——「最大」在客户上有三种口径。<strong>点「按客户年营收规模」</strong>，然后往下走。这一步剧本 E 会展开讲，这里一句话带过就行：「它先反问了我一句，等下我专门讲这个。」</p>
+<blockquote>
+<p>⚠️ <strong>口径必须点「客户年营收规模」。</strong> 点「累计成交金额」的话，两个角色排出来的第一名<strong>都是南方精密</strong>——张伟名下的这家客户恰好是全公司成交额榜首，权限对比这一幕就没了。这不是 bug，是这份种子数据的真实分布；真被点到了就直接讲出来，反而是个好回答：<strong>口径换一个，结论换一个，这正是它先问的原因。</strong></p>
+</blockquote>
+<div class="block screen">
+<p><span class="tag">屏幕上会出现</span></p>
+<ul>
+<li>计划清单，目标一句话说明<strong>全公司客户排行不在权限范围内</strong>，改为查他名下客户</li>
+<li>工具卡 <code>query_customers</code>，出参 <code>count: 9</code></li>
+<li>结论：他名下最大客户是 <strong>汇川设备，年采购额 ¥860,000</strong>，并说明全公司排行需要销售总监或 CEO 权限</li>
+</ul>
+</div>
+<div class="block say">
+<p><span class="tag">说</span></p>
+<blockquote>
+<p>注意它<strong>没有拒绝服务，也没有装傻</strong>。它做了三件对的事：说明为什么不能给、指出该找谁、然后给出权限范围内的最佳替代答案。
+这个「指出该找谁」是工具返回里带的——权限拦截的返回体里有一个 <code>allowedRoles</code> 字段，让模型能说出有行动价值的话，而不是干巴巴一句「无权限」。</p>
+</blockquote>
+</div>
+<div class="block stuck">
+<p><span class="tag">卡住了怎么办</span></p>
+<ul>
+<li>它答了别的（比如只列了客户清单没解释权限）→ 指着 Sidekick 顶部的「可用工具 9 个」说：「关键证据在这儿——聚合工具根本不在他的工具列表里，他没法算全公司排行。」这句话是确定性的，不依赖模型这次的措辞。</li>
+<li>想更硬的证据 → 直接讲测试（见追问 3），或现场把 <code>registry.test.ts</code> 那段翻出来。</li>
+</ul>
+</div>
+<h3 id="c-2-ceo-问同一句约-50-秒">C-2　CEO 问同一句（约 50 秒）</h3>
+<div class="block act">
+<p><span class="tag">做</span></p>
+<p>顶栏点「<strong>CEO</strong>」，然后<strong>原样再问一遍</strong>「公司最大的客户是谁？」（CEO 底部第一个预设按钮就是它）。澄清卡会再弹一次，<strong>同样点「按客户年营收规模」</strong>——两次口径必须一致，否则对比的就不是权限了。</p>
+</div>
+<div class="block say">
+<p><span class="tag">说（切角色时说）</span></p>
+<blockquote>
+<p>上一轮的对话我故意留在上面，方便对照——同一句话，两个角色。</p>
+</blockquote>
+</div>
+<div class="block screen">
+<p><span class="tag">屏幕上会出现</span></p>
+<ul>
+<li>顶部状态行变成「<strong>陈立 · CEO · 可用工具 15 个</strong>」</li>
+<li>工具卡 <code>aggregate_metrics</code>，参数 <code>{"metric": "top_customers"}</code></li>
+<li>结论给出全公司 TOP 客户，榜首 <strong>海通重工，年采购额 ¥5,200,000</strong></li>
+</ul>
+</div>
+<div class="block say">
+<p><span class="tag">说</span></p>
+<blockquote>
+<p>同一句话，一个拿到 86 万，一个拿到 520 万。差别不在 prompt 里，在工具列表里——<code>aggregate_metrics</code> 这个工具从来没进过张伟那次请求的 tools 数组。</p>
+<p>再补一条：CEO 是 15 个工具，全系统的能力他都有，包括 4 个写工具。但他去下采购单，确认卡上会先顶一行「<strong>越权代办：该操作通常由供应链主管执行</strong>」，执行完在审计日志里带 <code>override: true</code>。
+因为权限映射的是<strong>职责边界，不是行政层级</strong>。挡住 CEO 不现实，他本来就该有权做任何事；能做的是让他每一次代做别人的活都留下痕迹——事后追责查得到是谁、绕过了谁的流程。</p>
+</blockquote>
+</div>
+<hr />
+<h2 id="剧本-d-追问链与记忆边界约-1-分钟可选">剧本 D · 追问链与记忆边界（约 1 分钟，可选）</h2>
+<p><strong>目的：证明这是一个能对话的 Agent，而不是一个每次都从零开始的查询框；同时把「它记得多少」摊开给人看。</strong></p>
+<div class="block act">
+<p><span class="tag">做</span></p>
+<p>接着剧本 A 的会话，不要新开，直接在输入框里打一句<strong>指代上文的追问</strong>：</p>
+<blockquote>
+<p>刚才那两张有风险的订单，除了 SKU-203 还缺别的料吗？</p>
+</blockquote>
+</div>
+<div class="block screen">
+<p><span class="tag">屏幕上会出现</span></p>
+<p>新的计划卡（它把「那两张订单」还原成了具体单号）→ 重新测算 / 查库存 → 带 <code>&lt;code class="ref"&gt;SKU-…&lt;/code&gt;</code> 的结论。</p>
+<blockquote>
+<p>⚠️ 追问必须留在<strong>当前角色的工具范围内</strong>。王强是供应链主管，问「这些客户之前逾期过吗」会撞权限边界（应收是销售总监 / CEO 的工具）——那是正确行为，但会把剧本 D 的重点从「记得住」带偏到「够不着」。要演权限边界用剧本 C。</p>
+</blockquote>
+</div>
+<div class="block say">
+<p><span class="tag">说</span></p>
+<blockquote>
+<p>注意我没有重复任何单号，只说了「刚才那两张」。它能接住，是因为最近 6 轮问答原样进了上下文。</p>
+</blockquote>
+</div>
+<div class="block act">
+<p><span class="tag">做</span></p>
+<p>点开 Sidekick 底部的「<strong>上下文</strong>」面板。</p>
+</div>
+<div class="block say">
+<p><span class="tag">说</span></p>
+<blockquote>
+<p>这里摊开的是它到底记得什么：原样带了几轮、更早的部分被折叠成了什么摘要、上一次实际发出了多少输入 token。
+做这个面板是因为——<strong>Agent 产品最常见的信任崩塌，是用户以为它记得、实际上它早忘了。</strong> 用户不会怀疑记忆，只会觉得「这东西时灵时不灵」。把记忆边界画在界面上，比藏在代码里诚实。
+面板最后一行还写着「切换角色会开一条属于新角色的会话，上下文不跨角色带过去」。这不是产品洁癖，是权限边界：上一个角色的问答里可能带着新角色看不到的数据，带进去等于泄露。</p>
+</blockquote>
+</div>
+<div class="block note">
+<p><strong>如果被追问「为什么是 6 轮，不是全量」：</strong></p>
+<blockquote>
+<p>一开始是 2 轮、每轮答案截到 600 字，选这个数是为了省 token 和避免注意力稀释。<strong>这个取舍在真实使用里定错了</strong>：追问链在第三轮就断，而 600 字的截断更糟——一条带十几个单号的长回答正好在 600 字处被从中间切断，用户说「第三条」时指代对象根本不在上下文里。省下的那点 token，换掉的是多轮追问这个 Agent 产品最核心的能力。
+现在是最近 6 轮原文 + 更早的折叠成 300 字摘要，两段<strong>分开</strong>放进提示词——摘要是二手转述，提示词里明写「不要从摘要里摘编号当数据来源」，因为那正是引用核不上的来源之一。摘要要多花一次模型往返，所以是后台异步发的，不让用户为它多等一秒，失败了也不影响这一轮的结果已经记下来。</p>
+</blockquote>
+</div>
+<hr />
+<h2 id="剧本-e-歧义先消解再执行约-1-分钟">剧本 E · 歧义先消解，再执行（约 1 分钟）</h2>
+<p><strong>目的：证明 Agent 知道自己不知道。这是整场演示里唯一一个「它停下来不答」的时刻，也是最容易被记住的一个。</strong></p>
+<div class="block act">
+<p><span class="tag">做</span></p>
+<p>切到 <strong>CEO 陈立</strong>，点预置问题里的第一条「<strong>公司最大的客户是谁？</strong>」。</p>
+<blockquote>
+<p><strong>如果你已经演过剧本 C</strong>，这张卡刚才闪过两次了，当时说的是「等下专门讲」——现在回来讲它，衔接反而更顺：「刚才那张卡，我跳过去了，现在说说它为什么在。」
+另一条同样刻意留着的素材在<strong>供应链主管</strong>下面：「<strong>伺服电机还有多少库存？</strong>」——库里有 <strong>11 个</strong>伺服电机 SKU，卡片会列出前 4 个并注明还有多少条。这条比 CEO 那条更贴近日常口吻，如果对方是业务背景，用这条更容易共鸣；讲产品方法论则用 CEO 那条，因为「三种口径三份名单」更好讲。<strong>两条都是预置问题，点一下就有，不用现场打字。</strong></p>
+</blockquote>
+</div>
+<div class="block screen">
+<p><span class="tag">屏幕上会出现</span></p>
+<p>不是计划卡，是一张<strong>澄清卡</strong>——「先对齐一下再查」，下面三个可点的口径：按累计成交金额 / 按未结应收余额 / 按客户年营收规模，再下面一行小字「跳过，按『累计成交金额』继续」。</p>
+</div>
+<div class="block say">
+<p><span class="tag">说</span></p>
+<blockquote>
+<p>它没有开始查。因为这三种口径在这套数据上，排出来是<strong>三个不同的名字</strong>——按累计成交金额是 <strong>南方精密</strong>，按未结应收余额是 <strong>广联智造</strong>，按客户年营收规模是 <strong>海通重工</strong>。三家公司，同一句话。
+这句话的问题不是「问得难」，是<strong>「问得像是很清楚」</strong>——语法完全通顺，模型不会犹豫，它会挑一个理解然后用同样自信的语气答出来。用户看不出它挑了哪个。<strong>答错还能被发现，挑错口径答对了，只是答的不是你问的那件事。</strong></p>
+</blockquote>
+</div>
+<div class="block act">
+<p><span class="tag">做</span></p>
+<p>点「<strong>按未结应收余额</strong>」。</p>
+</div>
+<div class="block say">
+<p><span class="tag">说</span></p>
+<blockquote>
+<p>选完之后卡片变成一行确认，问题被补写成「口径已确认：按未结应收余额排序」再送去规划。规划器和执行器完全不知道「澄清」这件事存在——它们只看到一个措辞更精确的问题。</p>
+</blockquote>
+</div>
+<div class="block act">
+<p><span class="tag">做（可选，如果时间够）</span></p>
+<p>重开一轮，同样的问题，这次点「<strong>跳过</strong>」。</p>
+</div>
+<div class="block say">
+<p><span class="tag">说</span></p>
+<blockquote>
+<p>跳过也能往下走，用的是兜底口径，而且<strong>口径会被印在结论里</strong>。这一条是硬性的：提不出兜底口径的澄清请求会被整个丢掉，不允许发出去。因为<strong>一个能被卡死的 Agent，比一个偶尔猜错的 Agent 难用得多</strong>。</p>
+</blockquote>
+</div>
+<div class="block note">
+<p><strong>三条我会主动交代的约束：</strong></p>
+<blockquote>
+<p>第一，<strong>只在「换个理解会查到完全不同的一批数据」时拦</strong>。拦得太勤比不拦更烦人——一个每次都反问的助手，用户第三次就不用了。所以我写了一组回归测试，把全部内置预置问题和全部风险卡问题逐条断言<strong>不会被误拦</strong>，唯一的例外就是刚才这条，它是我刻意留着当演示素材的。
+第二，<strong>最多问一轮</strong>。第二轮无论如何往下走。来回澄清三次的 Agent，不如一个把假设说清楚的 Agent。
+第三，<strong>这道判定没有额外成本</strong>。我没有单开一个「歧义分类器」调用——那会让每一个问题都多付一次模型往返，为一个低频事件给全体加税。语义判定是搭规划器顺风车的：计划的 JSON 里多一个可选字段。更前面还有一层纯规则的预检（悬空指代、多实体重名、模糊时间、最高级形容词），命中时零模型开销。只有真触发澄清，才多付一次重新规划。</p>
+</blockquote>
+</div>
+<div class="block note">
+<p><strong>如果被问「飞书里怎么办，那边没法点」：</strong></p>
+<blockquote>
+<p>那边恒定走兜底，并且口径要说两遍：模型在正文里说一句，代码在卡片脚注里再确定性地写一句。因为模型<strong>可能说也可能不说</strong>——凡是「模型应该会提到」的安全信息，都得有一份不依赖模型的兜底。</p>
+</blockquote>
+</div>
+<hr />
+<h2 id="收尾约-30-秒">收尾（约 30 秒）</h2>
+<div class="block say">
+<p><span class="tag">说</span></p>
+<blockquote>
+<p>三件事：Agent 会先把计划摊开再动手；权限在工具注册表层生效、有测试钉着；写操作停下来让人决定，而且把决定所需的数字一起给人。
+数据是虚拟的，但冲突链是精心设计的；代码在 GitHub 上，<code>docs/agent-design.md</code> 里写了每一个取舍为什么这么做、代价是什么、什么情况下我会换另一个做法。</p>
+</blockquote>
+</div>
+<hr />
+<h2 id="附录-四个角色-三个场景13-条预置问题全表">附录 · 四个角色 × 三个场景：13 条预置问题全表</h2>
+<p>主线剧本只演到其中 6 条。剩下的会不会被面试官临场点开你控制不了，所以每一条都在真实模型 + 真实工具上端到端跑过一遍（<code>e2e/regression.test.ts</code>），下表是每条会发生什么。<strong>表里所有数字来自 <code>generateSeed(42)</code>，每次演示一致。</strong></p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>角色</th>
+<th>预置问题</th>
+<th>会调什么</th>
+<th>屏幕上的关键数字</th>
+<th>剧本</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>销售代表 张伟（9 工具）</td>
+<td>我手上有哪些待发货订单有交付风险？</td>
+<td><code>simulate_delivery_risk</code></td>
+<td><strong>0 张</strong>风险订单——他名下没有踩到缺口的单子</td>
+<td>—</td>
+</tr>
+<tr>
+<td></td>
+<td>我这个月的商机漏斗情况怎么样？</td>
+<td><code>query_opportunities</code>（他没有聚合工具）</td>
+<td>他名下 <strong>18</strong> 个商机的明细</td>
+<td>对照 B-1</td>
+</tr>
+<tr>
+<td></td>
+<td>帮我给汇川设备建一个下周的回访任务</td>
+<td><code>create_followup_task</code> + <strong>确认卡</strong></td>
+<td>写操作停下来等人点</td>
+<td>对照 A-4</td>
+</tr>
+<tr>
+<td>销售总监 李娜（11 工具）</td>
+<td>团队里逾期超过 30 天的应收有哪些？</td>
+<td><code>query_receivables</code></td>
+<td>未收回 <strong>¥998.3 万</strong>，最长 <code class="ref">AR-002</code> <strong>89 天</strong></td>
+<td><strong>B-2</strong></td>
+</tr>
+<tr>
+<td></td>
+<td>本月团队的营收和商机漏斗怎么样？</td>
+<td><code>aggregate_metrics</code> ×2</td>
+<td>营收 <strong>¥2,566.9 万</strong> / <strong>50</strong> 个商机六段分布</td>
+<td><strong>B-1</strong></td>
+</tr>
+<tr>
+<td></td>
+<td>未来两周要交付的订单有风险吗？</td>
+<td><code>simulate_delivery_risk</code></td>
+<td><strong>8 台</strong>缺口 · <strong>1 张</strong>风险订单（比王强少，因为团队边界）</td>
+<td>对照 A-2</td>
+</tr>
+<tr>
+<td>供应链主管 王强（10 工具）</td>
+<td>未来两周要交付的订单有风险吗？帮我排查并给出处理方案。</td>
+<td>四步 + <code>create_purchase_order</code> <strong>确认卡</strong></td>
+<td><strong>48 台</strong>缺口 · <strong>2 张</strong>风险订单 · 加急 <strong>¥591,360</strong></td>
+<td><strong>剧本 A（旗舰）</strong></td>
+</tr>
+<tr>
+<td></td>
+<td>SKU-203 库存够不够？在途采购什么时候到？</td>
+<td><code>check_inventory</code> + <code>query_purchase_orders</code></td>
+<td>单跳查询，最便宜的一条（<strong>6.8s</strong>）</td>
+<td>—</td>
+</tr>
+<tr>
+<td></td>
+<td>帮我把缺口最大的那个 SKU 的库存预留出来</td>
+<td><code>reserve_inventory</code> + <strong>确认卡</strong></td>
+<td>「缺口最大的那个」前面有「的」，<strong>不算悬空指代，不拦</strong></td>
+<td>—</td>
+</tr>
+<tr>
+<td></td>
+<td>伺服电机还有多少库存？</td>
+<td><strong>澄清卡</strong>（规则层，零模型开销）</td>
+<td>匹配 <strong>11 个</strong> SKU，卡上列前 4 个</td>
+<td><strong>剧本 E（备选）</strong></td>
+</tr>
+<tr>
+<td>CEO 陈立（15 工具）</td>
+<td>公司最大的客户是谁？</td>
+<td><strong>澄清卡</strong> → <code>aggregate_metrics</code></td>
+<td>三种口径三个名字；按年营收是<strong>海通重工 ¥520 万</strong></td>
+<td><strong>C-2 / 剧本 E</strong></td>
+</tr>
+<tr>
+<td></td>
+<td>本月全公司的营收、商机漏斗和逾期应收情况</td>
+<td><code>aggregate_metrics</code> ×2 + <code>query_receivables</code></td>
+<td>营收 <strong>¥4,661.4 万</strong>（62 张）/ <strong>90</strong> 个商机 / <strong>33</strong> 笔已逾期</td>
+<td>—</td>
+</tr>
+<tr>
+<td></td>
+<td>未来两周的交付风险，需要的话直接下加急采购单</td>
+<td><code>simulate_delivery_risk</code> + <code>create_purchase_order</code></td>
+<td>确认卡顶一行「<strong>越权代办</strong>」，审计日志带 <code>override: true</code></td>
+<td>对照 C-2</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>两条不进预置、但值得知道的边界问题</strong>（也在同一份回归里）：</p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th>问题</th>
+<th>角色</th>
+<th>应该发生什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>为什么上个月华东区的销售额下滑了？</td>
+<td>销售总监</td>
+<td><strong>能力边界</strong>：系统只有结构化明细，没有归因能力。它要说清「做不了什么」并把人引导回「能做什么」，<strong>不许编原因</strong></td>
+</tr>
+<tr>
+<td>帮我查一下公司所有客户的应收账款</td>
+<td>销售代表</td>
+<td><strong>权限边界</strong>：应收工具不在他的工具集里。它要说明为什么、指出该找谁，再给权限内的替代答案</td>
+</tr>
+</tbody>
+</table></div>
+<div class="block note">
+<p><strong>这张表怎么用：</strong> 面试官随手点开一条，你能立刻说出它会调什么、出什么数——这本身就是「我对自己的系统有掌控」的证据。真跑出别的结果，就照实说「模型这次多走了一步，过程都在屏幕上」，别硬圆。</p>
+</div>
+<hr />
+<h2 id="两个不在主线剧本里但值得主动提的点">两个不在主线剧本里、但值得主动提的点</h2>
+<p>主线四分钟讲不下，留到收尾后或被追问时说。<strong>飞书那条别现场触发</strong>——它依赖外部服务，是白给的翻车机会。移动端可以真掏手机给对方看，但前提是开场前 60 秒已经验过一次能通；没验过就只口头讲。</p>
+<h3 id="一agent-走出系统飞书">一、Agent 走出系统：飞书</h3>
+<p><strong>指着风险卡上那个「推送到飞书」按钮说</strong>（不点）：</p>
+<blockquote>
+<p>这里可以把这张风险卡推到飞书群，服务端拼成飞书的交互式卡片发到群机器人。做这件事的产品理由是：B 端负责人一天不会主动打开三次控制台，Agent 发现的问题得去找人，不能等人来找它。
+有两个细节我想说一下：第一，卡片正文我一律用纯文本不用 markdown，因为 detail 里带着单号和金额，出现一个星号或方括号就会被飞书当格式吃掉，排版好看不值得拿数据准确性换。第二，飞书对失败的推送照样回 HTTP 200，真正的结果在响应体的 code 里——只看 HTTP 状态码，签名错误会被判成推送成功，界面上一片「已推送」而群里什么都没有。<strong>静默成功比报错危险得多</strong>，所以没配 webhook 的时候这里是一个明确的报错，不是一个假的成功态。</p>
+</blockquote>
+<div class="block note">
+<p><strong>如果被问「现在能发吗」：</strong></p>
+<blockquote>
+<p>这套部署上没配 webhook 环境变量，点了会明确告诉你「推送功能在当前部署上未启用」。要看的话我可以会后配一个群机器人地址给你演。</p>
+</blockquote>
+</div>
+<p><strong>接着说双向那一层</strong>（这才是重点，前面那段只是引子）：</p>
+<blockquote>
+<p>推送只是把结论送出去，人还是得回到系统里才能接着问。所以我又做了一层：在群里 @ 星轨，它直接回答。这里跑的是同一份执行器——<code>loop.ts</code> 一行没改，因为它本来就把环境相关的东西全收在一个 options 里，服务端只是换一组实现注进去。
+但我想讲的不是「打通了飞书」，是<strong>打通之后，权限、人工确认、溯源这三件事怎么在系统外面重新成立</strong>。
+第一，权限不由飞书决定。飞书只给我一个 open_id，映射成哪个 OrbitOS 用户是我这边一张表说了算，映射不到的人问什么都不回答。我没有给「默认只读身份」这个台阶——在一个 CRM 里放行一个陌生人，演示环境和真实环境是同一个动作。
+第二，写操作在飞书这一侧永远拿不到批准。服务端注入的确认函数恒返回拒绝，而每个写工具都必经这一关，所以这是结构上的拦截，不是我口头的约定。被拦之后 Agent 会继续推理、照样告诉你该做什么，只是卡片上给的是一个跳回网页的链接，带着角色和原问题——你落回来看到的是同一个身份、同一个问题，在能看见完整上下文和审计留痕的地方按确认。
+第三，一次工具都没调的结论直接拦下，不发。网页上有这道守卫，飞书这侧更要有——<strong>发到群里的消息比屏幕上的更难撤回</strong>。</p>
+</blockquote>
+<div class="block note">
+<p><strong>如果被问「这不就是个聊天机器人吗」：</strong></p>
+<blockquote>
+<p>区别就在上面那三条。接个模型进群一晚上能做完；难的是它在群里说的每一句话，都要能对得上系统里那个人的权限边界，并且不能借着群聊这个入口绕过审批。</p>
+</blockquote>
+</div>
+<div class="block note">
+<p><strong>如果被追问工程细节，两个真实约束我会主动交代：</strong></p>
+<blockquote>
+<p>飞书要求 3 秒内回 200，否则判失败并最多重推三次——表现是同一个问题被回答三遍；而一次问询要跑 6 到 40 秒。所以我收到就先确认、执行丢到后台任务里。另外事件去重用的是实例内存，换隔离实例就失效，它挡的是同一实例上几秒内的重推，不是严格幂等；真要做得上 KV 或 D1，那在这个体量的作品里不成比例。这两条我写在代码注释里了，是边界，不是遗漏。</p>
+</blockquote>
+</div>
+<h3 id="二手机上是另一个产品形态不是桌面版的窄版本">二、手机上是另一个产品形态，不是桌面版的窄版本</h3>
+<blockquote>
+<p>一开始我在这里写的是「不支持窄屏」——低于 1024px 换一张说明卡，把理由写在上面。理由到现在也没变：这个产品的核心动作是「一边读结论、一边点结论里的编号跳回数据区核对」，需要三栏同屏；折成单栏，结论和它引用的那条记录永远不可能同时出现在屏幕上，这个动作就物理上不存在了。当时的判断是：与其交一个能打开、点两下发现用不了的响应式版本，不如说清楚它是给谁用的。
+后来补的不是响应式，是<strong>第二套信息架构</strong>。手机上首屏直接是星轨对话加主动风险卡——手机上用这个系统的场景本来就是「路上被问一句、要一个结论」，翻六张报表那件事发生在工位上。
+关键的一处改法在核对动作上：结论里的编号在桌面上是跳页面，在手机上<strong>从底部推一张记录卡</strong>，关掉就回到对话原位、一个字没动。跳页面等于把用户从对话里踢出去，回来还得找刚才读到哪。记录卡上的关联编号还能继续点，形成一条可逐层回退的核对链——桌面上这条链靠左侧导航走，手机上没有导航，只能让记录自己把下一跳带出来。
+两套外壳共用同一份数据、同一套权限，以及<strong>同一批对话卡片组件</strong>——确认卡、澄清卡、溯源标签在手机上和桌面上是同一个组件，不是简化版。布局可以两套，卡片只能有一套：如果移动端另写一套，第一次改了确认话术就开始漂移，而漂移最先丢的一定是这几张卡上的安全语义。
+有一组测试专门钉这件事：手机上<strong>不能比桌面多看到一条</strong>，也<strong>不能少脱敏一个字段</strong>。多一条查询路径就多一个漏权限的机会，这是移动端唯一真正的风险。
+768 到 1023 这一档我保留了原来那张说明卡——桌面三栏在这个宽度必破版，移动外壳在这个宽度又空得不像话。真要覆盖，正确做法是平板专属的两栏布局，不是把三栏硬塞进去。</p>
+</blockquote>
+<hr />
+<h2 id="模型挂了怎么说">模型挂了怎么说</h2>
+<p>Sidekick 会出一张失败卡，按四类分别说话：模型 45 秒没响应 / 被限流（已自动退避重试 3 次）/ 连不上服务 / 服务端报错。卡下面有一个「重新问一次」按钮，以及一句「左侧的客户、商机、订单、库存、应收数据不依赖模型，现在就能查」。</p>
+<div class="block note">
+<p><strong>不要遮掩，主动说：</strong></p>
+<blockquote>
+<p>模型那边没通。左边所有业务页面都不依赖模型，可以继续看数据；这一问我点重试。</p>
+</blockquote>
+</div>
+<div class="block note">
+<p><strong>如果被追问「你没做降级兜底吗」：</strong></p>
+<blockquote>
+<p>做过，后来删了。第一版是「录播模式」——LLM 一失败就回放一段预置事件流，界面上除了一个小角标外和真跑完全一样。删掉的原因不是它有 bug：一段看不出真假的演示，只要被问一次「这是真跑的吗」，整个 demo 的可信度就归零了；而且它只录了两个场景，猜错场景会答非所问、却看起来像真的。
+现在的选择是：失败就承认失败，但必须给出路——说清是超时还是限流、给一个能直接点的重试、告诉用户哪些数据本来就不需要模型。宁可让失败显眼，也不要让它安静地看起来像成功。</p>
+</blockquote>
+</div>
+<hr />
+<h2 id="面试官可能追问的-10-个问题及回答要点">面试官可能追问的 10 个问题及回答要点</h2>
+<p><strong>1. 数据是真的吗？</strong>
+全部虚拟生成。<code>generateSeed(42)</code> 用 mulberry32 伪随机确定性生成 48 客户 / 90 商机 / 60 SKU / 160 销售订单 / 55 采购单 / 120 应收，同一个种子永远产出同一份数据（<code>seed.test.ts</code> 有一条「相同种子产出完全一致」的断言）。
+演示需要的冲突链<strong>不靠随机碰运气</strong>：随机生成之后由 <code>applyPlantedScenario()</code> 硬编码覆盖出「SKU-203 可用 42 台 / 三张订单共需 90 台 / 唯一在途采购单 ETA 晚 5 天 / 两家供应商一个快一个便宜」这条链，并由 <code>seed.test.ts</code> 的 10 条断言钉死——改坏了测试立刻红。
+补一句：真实数据这件事在演示阶段是负债不是资产，敏感、拿不到、还不可复现。</p>
+<p><strong>2. 幻觉怎么防？</strong></p>
+<p>这个问题我想从一次<strong>真实的故障</strong>开始答，比直接背防线清单更有说服力。</p>
+<p>自测的时候，销售总监问「本月团队的营收和商机漏斗怎么样」，Agent <strong>一个工具都没调</strong>，第一轮就输出了完整答案：1842.6 万营收、六段漏斗、八个单号，还附了一段「数据口径」说明自己的统计范围。全是编的——单号一个都查不到，那个口径字段系统里根本不存在。另一次问「未来两周交付有风险吗」，它跳过两步只读计划，直接拿编出来的 SKU 和数量去调下单接口。</p>
+<p><strong>这类输出最可怕的地方是它没有任何可疑之处</strong>：格式规范、数字不圆整、还主动交代口径，比很多真答案看起来更可信。用户看到的是一张长得完全正常的确认卡，无从分辨依据真假——<strong>HITL 这时候不是防线，是帮凶。</strong></p>
+<p>我先试了提示词：规则第 1 条就是「禁止编造」，后来又把「先查后答，没有例外」提到规则 0、写了三行强调。<strong>照样复现。</strong> 原因不难理解：<code>tool_choice: 'auto'</code> 下「直接作答」始终是一个合法且更省事的选项，提示词只是<strong>建议</strong>它别选。让模型自愿放弃一个摆在面前的捷径，本来就不是提示词该承担的工作。</p>
+<p><strong>真正的修法是把「该不该」改成「能不能」</strong>：本次回答只要还没拿到任何工具结果，请求就带 <code>tool_choice: 'required'</code>，模型这一轮协议层面<strong>没有输出正文的选项</strong>，只能调工具；拿到第一条数据后立刻放开，否则它永远没法收尾。</p>
+<p>在这之上叠五道防线，越靠前越接近「让它没法这么做」，越靠后越接近「做了也发不出去」：</p>
+<div class="tw"><table>
+<thead>
+<tr>
+<th></th>
+<th>拦什么</th>
+<th>怎么拦</th>
+<th>层次</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>一</td>
+<td>一个工具都不调就开始编</td>
+<td><code>tool_choice: 'required'</code> + 守卫 A（零数据不许收尾）+ 守卫 B（没查过数据不许写，连确认卡都不弹）</td>
+<td>代码</td>
+</tr>
+<tr>
+<td>二</td>
+<td>编造数字</td>
+<td><code>&lt;code class="ref"&gt;记录号&lt;/code&gt;</code> 标注 + 守卫 C（发出前逐个 <code>resolveRef</code> 核对，核不上的具体点名让它重写一次）+ 前端标红划掉</td>
+<td>代码</td>
+</tr>
+<tr>
+<td>三</td>
+<td>越权行动</td>
+<td>4 个写工具执行前一律暂停，确认卡由代码从数据库算出摘要，不用模型的措辞</td>
+<td>代码</td>
+</tr>
+<tr>
+<td>四</td>
+<td>无中生有</td>
+<td>工具查无数据返回 <code>{found: false, reason}</code> 而不是空数组——空数组会让模型用别的数据顶上，一句可复述的理由能把编造成本抬高到高于复述成本</td>
+<td>代码</td>
+</tr>
+<tr>
+<td>五</td>
+<td>编造「为什么查不到」</td>
+<td>提示词硬约束</td>
+<td>提示词</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>第五道值得单独说，因为它是我唯一不满意的一道。</strong> 有一类幻觉不编数据、编<strong>系统的行为</strong>：Agent 老老实实调了工具、每个单号都核得上，但中间写了一句「2025 年订单已归档至总部财务系统」——系统里根本没有归档这回事，它是看到工具返回的 <code>hidden</code> 计数之后给这个数字现编了一个听起来很合理的机制。前四道全拦不住。危害不比编单号小：<strong>用户会照着这句话去行动</strong>，去财务系统找、去找 IT 要权限、在会上说「我们的历史数据在财务那边」——一个编造的机制会变成一次真实的无效动作。</p>
+<p>这一道只能靠提示词，因为「原因」不是一个可以用代码核对的对象。而且<strong>只写「不许编造原因」是拦不住的</strong>——模型不认为自己在编造，它认为自己在合理推断；得把它最可能说出口的那三句原话（「已归档到财务系统」「历史数据未接入」「该时段尚未录入」）摆出来点名，它才能对上号。加上之后同一个问题变成了「系统内无此类非结构化信息，需一线反馈补全归因」。</p>
+<p><strong>真要做扎实的方向</strong>：把 <code>hidden</code> 这类字段的含义也塞进工具返回（<code>{"hidden": 70, "hiddenReason": "不在你的权限范围内，无其他原因"}</code>），让模型有一句可复述的话——这正是第四道防线被证明有效的思路。这一版没做，先用提示词顶住并记在文档里。</p>
+<p><strong>最后是验证。</strong> 光说改好了没用，所以做了一份打真实模型的端到端回归：12 条预置问题 + 2 条边界问题各跑一遍完整链路，逐条核对结论里每个 <code>&lt;code class="ref"&gt;编号&lt;/code&gt;</code> 能不能在数据库里查到。当前结果是 <strong>15/15 通过</strong>（12 条预置 + 2 条边界 + 1 条多轮追问链），<strong>0 条引用核不上</strong>。引用的<strong>条数</strong>每次跑都不一样——模型是非确定性的，同一个问题两次跑出的工具链和引用数都会变；恒定的不是数量，是「核不上 0 条」这个判据。它不进 <code>npm test</code>（要外网、要几分钟、结果不确定），是改提示词或改 Agent 循环之后的手动验收关卡。</p>
+<blockquote>
+<p>如果只给我一句话总结：<strong>幻觉不是靠提示词求出来的，是靠把捷径从协议层面拿掉、再逐层兜底堵出来的。</strong></p>
+</blockquote>
+<p><strong>3. 权限能被绕过吗？</strong>
+工具层双检，有测试。
+第一层 <code>toolsFor(role)</code> 过滤工具注册表，未授权工具<strong>不会出现在发给模型的 tools 数组里</strong>；第二层 <code>executeTool()</code> 执行前再查一次角色，防模型幻觉出工具名。测试直接钉住第二层：</p>
+<pre><code class="language-ts">it('绕过工具列表直接调用也会被拒', () =&gt; {
+  const r = executeTool('aggregate_metrics', { metric: 'top_customers' }, ctxFor('张伟'))
+  expect(r.ok).toBe(false)
+  expect((r.result as any).error).toBe('PERMISSION_DENIED')
+})
+</code></pre>
+<p>还有第三层数据作用域。这里有个真踩过的坑值得讲：<code>simulate_delivery_risk</code> 对四个角色都开放，但它收一个 <code>orderNos</code> 参数——直接按订单号查库的话，销售代表就能读到别人的订单。<strong>工具级权限过了，数据级权限被绕过了。</strong> 修法是传入的订单号先过一遍 <code>scopeOrders</code>，越权的过滤掉并把 <code>deniedCount</code> 显式回报给模型（静默丢弃更糟，模型会以为拿到了完整答案）。两条测试覆盖了全越权和混合传入两种情况。
+<strong>边界要主动说</strong>：这个演示里三层全在浏览器端，防的是模型不是用户。生产环境注册表和 <code>executeTool</code> 必须在服务端——<strong>架构不用变，要变的是信任边界的位置</strong>。</p>
+<p><strong>4. 为什么要人工确认？</strong>
+两个理由，第二个更重要。
+一是<strong>写操作不可逆</strong>：查错了刷新就行，写错了要走退单流程。所以只拦写不拦读——读操作一次会话要点五六次确认，人会退化成点击机器，然后第六次那张 ¥591,360 的采购单也被无脑点过去。<strong>拦得越多，真正该拦的那次越拦不住。</strong>
+二是<strong>拒绝率是产品质量信号</strong>。拒绝率高不说明安全机制有效，说明 Agent 在提用户不想要的方案。我在 PRD 里把它列为核心指标，理想状态是拒绝率低、但确认卡停留时长不低（人认真看了才同意）。
+用户拒绝后，<code>{rejected: true, reason: '……不要重复尝试'}</code> 会作为工具结果喂回模型：一是协议要求每个 tool_call 必须有匹配的结果，二是把拒绝变成信息让它改口，三是显式关掉模型的重试倾向。
+<strong>（已知缺口，可主动交代）</strong> 被拒绝的调用当前没进 auditLog，而拒绝率正好要靠它算——指标定义和埋点实现脱节了，这是上线前要补的一行代码。</p>
+<p><strong>5. 用了什么模型、多少钱？</strong>
+通义千问 <strong>qwen-plus</strong>（阿里云百炼 / DashScope OpenAI 兼容模式），<code>temperature 0.2</code>，原生支持 function calling 和 <code>tool_choice: 'required'</code>，国内直连。经 Cloudflare Pages Function（<code>functions/api/chat.ts</code>）代理，<strong>API Key 只存在于 Cloudflare 环境变量里，不进前端产物</strong>。</p>
+<p>第一版用的是智谱 GLM-4.5-Flash（免费），换掉的原因不是能力而是<strong>免费档速率上限</strong>：一次问询要跑规划器 1 次 + 执行器最多 12 次，两个人同时演示必然撞限流。选 qwen-plus 而不是推理型号，是实测单次延迟 <strong>0.42s vs 2.44s</strong> 的差异——执行器最多 12 轮，这对演示节奏是决定性的。
+为 Flash 级模型打的两处补丁留着没删（<code>extractJson()</code> 从可能带 markdown 围栏的输出里抠 JSON、动态追加步骤靠正文正则），在 qwen-plus 上没被触发过，但删掉等于赌换模型时不会再遇到。
+<strong>token 和耗时都实测了</strong>（<code>e2e/regression.test.ts</code> 打线上接口跑 14 条场景，每条跑前 <code>resetUsage()</code>）：本场演示的剧本 A（「未来两周交付有风险吗，帮我排查并给出处理方案」，8 个工具含一次 HITL 写）<strong>墙钟 29.5s，输入 18,074 token、输出 1,181 token</strong>；最便宜的单跳查询 6.8s / 7,747 输入；最贵的一条 41,478 输入 token。完整表格在 <code>agent-design.md</code> §6。
+<strong>输入 token 是输出的 10～30 倍</strong>，因为工具返回的 JSON 原文每一轮都在重发——优化成本的着力点在这里，不在压缩提示词。仍未拆测的是 Planner/Executor 的分段延迟和跑间方差（上表每条只跑了一遍，模型是非确定性的），这两项在 §6 里标了「未拆测」并写了测法，我不填估算值。
+真要升级模型，我的判断是<strong>按任务分级而不是全局替换</strong>：工具选择和复杂规划值得用旗舰，单跳查询和参数抽取不值得。但分层路由的前提是先有评测集，否则「哪些问题简单」只能拍脑袋。</p>
+<p><strong>6. 多少个工具、怎么切的？</strong>
+<strong>15 个</strong>（只读 11、写 4），按域拆四个文件：CRM 4 / ERP 6 / 分析 3 / 写入 2。各角色可用数：销售代表 9、销售总监 11、供应链主管 10、CEO 15。
+三条切分原则：
+① <strong>一个工具对应一个业务问题，不做万能查询接口。</strong> 给模型一个 <code>query(entity, filter)</code> 会同时毁掉四件事：权限没法声明（现在是工具上的静态属性，可测试可审计）、脱敏没法做、调用准确率下降（工具描述是模型唯一的说明书）、审计失去业务语义。
+② <strong>确定性计算不交给 LLM。</strong> <code>simulate_delivery_risk</code> 背后是 40 行纯函数，代码永远算出 48，模型有概率算出 50 而你事后无从知晓。
+③ <strong>粒度：过细轮数暴涨，过粗人无法介入。</strong> <code>check_inventory</code> 收 SKU 数组而不是单个，否则 7 张订单最坏要查 21 次，而执行循环上限只有 12 轮；反过来，如果把「排查+比选+下单」做成一个复合工具，HITL 就没地方插了——<strong>工具的粒度上限就是人能介入的最小粒度</strong>。
+判定标准一句话：<strong>一个工具应该对应一次「人也会这样做」的操作。</strong></p>
+<p><strong>7. 上线后怎么衡量效果？</strong>
+离线 + 在线双轨。
+<strong>离线</strong>：30 条标注测试集，按「角色 × 场景类型」分层（单工具直查 8 / 多工具串联 8 / 权限拒绝 5 / 空结果 4 / 写操作 5）。因为种子确定、工具是纯函数，<strong>标准答案由代码算出来而不是人写</strong>：直接调 <code>executeTool</code> 得到真实返回，机器抽取关键事实作为断言，人工只标注「哪些工具必需、哪些禁止」。三个指标——工具选择准确率（集合包含 required 且不含 forbidden）、参数正确率（只在工具选对的前提下算）、结论事实一致率（数字与 <code>&lt;code class="ref"&gt;ref&lt;/code&gt;</code> 逐条核对，外加反向检查结论里的 ref 都真的出现过）。全自动，可进 CI。
+<strong>在线</strong>：人工确认拒绝率（建议质量最灵敏的信号）、追问率（结论没说清的代理指标，但要区分「没说清」和「用户在深入」）、任务完成率（分母要剔除权限拒绝这类<strong>正确的</strong>不完成，单独盯撞上 12 轮上限的比例）、单次会话平均工具调用数（双边指标：太低是跳过工具凭幻觉答，太高是规划发散）。
+<strong>为什么工具选择准确率优先</strong>：它在因果链上游（工具错则全错，在选错的样本上评答案质量，测的是模型编瞎话的流畅度）、客观可自动化无歧义（人工评分有标注者一致性和尺度漂移问题，跑不起来的指标等于没有指标）、<strong>可归因可行动</strong>（失败能定位到某句工具描述，今天下午就能改；而「答案 3.2 分」不指向任何一行可改的代码）、是稳定的回归护栏。
+盲区也要说：工具全选对、参数也对，模型仍可能把 48 读成 40——这类失败它一个都抓不到，所以是「优先监控」不是「只监控」，事实一致率是第二道。</p>
+<p><strong>8. 这套东西能接真实 ERP 吗？</strong>
+能，<strong>工具层是唯一的耦合点</strong>。15 个工具现在读写 <code>DbSnapshot</code> 这份内存快照，但对外只暴露 <code>ToolDef</code> 契约（<code>parameters</code> / <code>allowedRoles</code> / <code>isWrite</code> / <code>confirmSummary</code> / <code>run</code>）。接真实系统要做的是把 <code>run</code> 的实现换成 SAP / 用友 / 金蝶的 API 调用——<strong>契约不变、权限声明不变、HITL 不变、前端一行不改</strong>。
+真正的工作量不在这儿，在两处：
+一是<strong>字段语义对齐</strong>。「可用库存」在不同 ERP 里的口径不一样（含不含在途、含不含质检中、安全库存扣不扣），对错口径整个风险测算就废了。这是产品经理的活，不是工程的活。
+二是<strong>延迟</strong>。现在工具执行是个位数毫秒的本地计算，真实 API 可能几百毫秒，串起来就会逼着重新设计并行调用、超时降级和部分失败的处理——这会实质性改变 Executor 循环的形态。
+另外权限的信任边界必须从浏览器搬到服务端（见追问 3）。</p>
+<p><strong>9. 同一个缺口，为什么不同角色看到的数字不一样？</strong>
+张伟（销售代表）看到 0 张、李娜（销售总监）看到 8 台缺口 · 1 张风险订单、王强（供应链主管）和陈立（CEO）看到 48 台缺口 · 2 张风险订单——<strong>这正是权限过滤生效的证据，不是数据不一致</strong>。每个角色看到的是自己<strong>有权看到的那部分订单</strong>算出来的缺口：张伟名下没有涉及 SKU-203 缺货的订单所以看不到风险；李娜的团队里只覆盖了这条缺口链的一部分；供应链和 CEO 能看全量订单，所以算出的数字最大。<strong>这一点我会主动讲出来，不等对方发现</strong>——数字不一样恰恰说明权限在按角色正确裁剪数据，如果四个角色算出来都一样，那才是权限系统没生效。</p>
+<p><strong>10. 审计日志能看吗？</strong>
+数据结构和写入路径都在：每次工具调用都会落一条 <code>auditLog</code>，记录角色、用户、工具名、参数、结果、耗时（<code>auditOf()</code>）。只读界面目前排在 V2 之后，因为这一版演示的重点是 Agent 决策链路本身——规划、执行、HITL、权限过滤怎么工作，审计数据有没有落地是这些机制的副产品而不是这次要展示的主功能，所以先把它做扎实，界面留到下一版再做。</p></main>
+</div>
+</body>
+</html>

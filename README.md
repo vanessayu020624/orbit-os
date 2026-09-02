@@ -211,6 +211,7 @@ E2E_ONLY=sc-1,ceo-2 E2E_OUT=/tmp/e2e.md npx vitest run --config vitest.e2e.confi
 | [`docs/PRD.md`](docs/PRD.md) | 问题定义、目标用户与场景、功能范围与非目标、核心流程、权限模型、成功指标、迭代规划 |
 | [`docs/agent-design.md`](docs/agent-design.md) | **Agent 架构设计说明**：为什么选 Planner–Executor、工具边界怎么切、权限为什么放在工具层、幻觉防护五道防线、HITL 的产品设计、成本与延迟、上线后怎么评测、把 Agent 搬到系统外面（飞书） |
 | [`docs/demo-script.md`](docs/demo-script.md) | 现场演示逐句台词、操作步骤、屏幕预期与卡壳预案，附 10 个高频追问的回答要点 |
+| [`docs/demo-script.html`](docs/demo-script.html) | 上一行的排版版，投屏 / 打印成 PDF 用；由 `python3 docs/build-demo-html.py` 从 md 生成，别手改 |
 | [`docs/img/README.md`](docs/img/README.md) | 截图拍摄清单 |
 | [`docs/superpowers/specs/2026-09-02-orbitos-design.md`](docs/superpowers/specs/2026-09-02-orbitos-design.md) | 施工前的原始设计文档（历史存档，部分内容已被实现修正，以代码为准） |
 | [`STATE.md`](STATE.md) | 分期施工记录与踩坑笔记 |
