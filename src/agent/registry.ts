@@ -1,4 +1,5 @@
 import type { ToolDef, Role, ToolContext, AuditEntry } from '../lib/types'
+import { ROLE_META } from '../lib/rbac'
 import { crmTools } from './tools/crm'
 import { erpTools } from './tools/erp'
 import { analyticsTools } from './tools/analytics'
@@ -20,6 +21,23 @@ export function toolSchemasFor(role: Role) {
 
 export function toolCatalogText(role: Role): string {
   return toolsFor(role).map(t => `- ${t.name}: ${t.description}`).join('\n')
+}
+
+/**
+ * 本角色**没有**、但系统里确实存在的能力，附带谁有权限。
+ *
+ * 为什么必须给模型：只喂本角色工具目录时，模型分不清「系统没这个能力」和
+ * 「你这个角色无权」，实测它会把销售代表问应收答成「当前系统不支持查询应收账款」——
+ * 系统明明支持。口径错了，比拒绝本身更伤可信度。有了这张表它才能正确归因并指路。
+ */
+export function restrictedCatalogText(role: Role): string {
+  const lines = ALL_TOOLS
+    .filter(t => !t.allowedRoles.includes(role))
+    .map(t => {
+      const who = t.allowedRoles.map(r => ROLE_META[r].label).join('、')
+      return `- ${t.name}: ${t.description.split('。')[0]}。（需要：${who}）`
+    })
+  return lines.length ? lines.join('\n') : '（无——本角色可使用系统全部能力）'
 }
 
 export interface ExecResult { ok: boolean; result: unknown; ms: number }

@@ -9,7 +9,7 @@ import { defineConfig, loadEnv, type Plugin } from 'vite'
  * 密钥从 .env.local 读（该文件已在 .gitignore 里，绝不进仓库）。
  */
 function devChatApi(mode: string): Plugin {
-  const key = loadEnv(mode, process.cwd(), '').ZHIPU_API_KEY
+  const key = loadEnv(mode, process.cwd(), '').DASHSCOPE_API_KEY
   return {
     name: 'orbitos-dev-chat-api',
     apply: 'serve',
@@ -27,7 +27,7 @@ function devChatApi(mode: string): Plugin {
         req.on('data', c => chunks.push(c as Buffer))
         req.on('end', async () => {
           try {
-            const upstream = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', {
+            const upstream = await fetch('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
               body: Buffer.concat(chunks).toString('utf8'),

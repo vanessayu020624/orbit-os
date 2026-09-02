@@ -11,6 +11,17 @@ import SelfTest from './pages/SelfTest'
 import AgentPage from './pages/AgentPage'
 import { Sidekick } from './sidekick/Sidekick'
 import { SidekickProvider } from './sidekick/SidekickProvider'
+import { Link } from 'react-router-dom'
+
+function NotFound() {
+  return (
+    <div className="py-16 text-center">
+      <div className="text-lg font-medium mb-1">页面不存在</div>
+      <div className="text-sm text-slate-400 mb-4">这个地址没有对应的页面，可能是链接输错了。</div>
+      <Link to="/" className="text-sm text-brand hover:underline">返回仪表盘</Link>
+    </div>
+  )
+}
 
 export default function App() {
   return (
@@ -32,6 +43,9 @@ export default function App() {
                   <Route path="/purchases" element={<Purchases />} />
                   <Route path="/receivables" element={<Receivables />} />
                   <Route path="/agent" element={<AgentPage />} />
+                  {/* 没有这条兜底时，任何打错的地址都渲染成一片空白——外壳在、内容区空，
+                      看的人分不清是路由错了还是页面崩了。实探时就是这样丢了一次信任。 */}
+                  <Route path="*" element={<NotFound />} />
                 </Routes>
               </AppShell>
             }

@@ -65,16 +65,16 @@
                               ┌──────────────────▼──────────────────┐
                               │ Cloudflare Pages Function            │
                               │ functions/api/chat.ts                │
-                              │  读环境变量 ZHIPU_API_KEY 并转发       │
+                              │  读环境变量 DASHSCOPE_API_KEY 并转发   │
                               └──────────────────┬──────────────────┘
                                                  │
                               ┌──────────────────▼──────────────────┐
-                              │ 智谱 GLM-4.5-Flash                   │
-                              │ open.bigmodel.cn（OpenAI 兼容接口）   │
+                              │ 通义千问 qwen-plus                    │
+                              │ dashscope.aliyuncs.com（兼容模式）    │
                               └─────────────────────────────────────┘
 ```
 
-**技术栈**：React 19.2 + TypeScript 6.0 + Vite 8.2 · Tailwind CSS 3.4 · Zustand 5 · Recharts 3.10 · React Router 7.18 · Vitest 4.1 · Cloudflare Pages + Pages Functions · 智谱 GLM-4.5-Flash
+**技术栈**：React 19.2 + TypeScript 6.0 + Vite 8.2 · Tailwind CSS 3.4 · Zustand 5 · Recharts 3.10 · React Router 7.18 · Vitest 4.1 · Cloudflare Pages + Pages Functions · 通义千问 qwen-plus（DashScope OpenAI 兼容模式）
 
 **数据**：全部由 `generateSeed(42)` 运行时确定性生成（mulberry32 伪随机），无数据库、无后端存储。48 客户 / 90 商机 / 60 SKU / 160 销售订单 / 55 采购单 / 120 应收。演示所需的冲突链在随机生成之后由 `applyPlantedScenario()` 硬编码覆盖，由 `seed.test.ts` 的断言钉死。
 
@@ -92,10 +92,10 @@ npm run dev          # http://localhost:5173
 ⚠️ **`npm run dev` 不会启动 Pages Function，`/api/chat` 会返回 404**，Sidekick 会因此进入录播模式。要在本地跑真实 LLM：
 
 ```bash
-# 需要一个智谱 API Key（open.bigmodel.cn 注册后免费获取）
+# 需要一个阿里云百炼 API Key（bailian.console.aliyun.com 开通 DashScope 后获取）
 npx wrangler pages dev -- npm run dev
 # 或先构建再起：
-npm run build && npx wrangler pages dev dist --binding ZHIPU_API_KEY=<your-key>
+npm run build && npx wrangler pages dev dist --binding DASHSCOPE_API_KEY=<your-key>
 ```
 
 其他命令：
@@ -114,10 +114,10 @@ npm run lint         # oxlint
 
 1. 推送到 GitHub，在 Cloudflare Pages 里连接该仓库。
 2. 构建配置：构建命令 `npm run build`，输出目录 `dist`。
-3. 在 Pages 项目的 **Settings → Environment variables** 里加 `ZHIPU_API_KEY`，值为智谱开放平台的 API Key。
-4. `functions/api/chat.ts` 会被自动映射为 `/api/chat`，它读取该环境变量并把请求原样转发给 `https://open.bigmodel.cn/api/paas/v4/chat/completions`。
+3. 在 Pages 项目的 **Settings → Environment variables** 里加 `DASHSCOPE_API_KEY`，值为阿里云百炼的 API Key。
+4. `functions/api/chat.ts` 会被自动映射为 `/api/chat`，它读取该环境变量并把请求原样转发给 `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`。
 
-**API Key 不进前端产物。** 浏览器只请求同源的 `/api/chat`，Key 只存在于 Cloudflare 的环境变量里。未配置 Key 时该 Function 返回 503 `NO_KEY`，前端捕获后走录播兜底而不是白屏。
+**API Key 不进前端产物。** 浏览器只请求同源的 `/api/chat`，Key 只存在于 Cloudflare 的环境变量里。未配置 Key 时该 Function 返回 503 `NO_KEY`，前端捕获后走预置演示兜底而不是白屏。
 
 `public/_redirects` 里配了 SPA 回退，否则在 Pages 上直接刷新 `/orders` 这类子路由会 404。
 

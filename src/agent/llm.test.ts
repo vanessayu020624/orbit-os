@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { chat, LlmRateLimited, LlmUnavailable, resetUsage, sumUsage } from './llm'
+import { chat, MODEL, BACKOFF_MS, LlmRateLimited, LlmUnavailable, resetUsage, sumUsage } from './llm'
 
 const OK_BODY = {
   choices: [{ message: { role: 'assistant', content: '好的' } }],
@@ -12,6 +12,9 @@ let fetchMock: ReturnType<typeof vi.fn>
 const bodyOf = (i: number) => JSON.parse(fetchMock.mock.calls[i][1].body as string)
 const call = () => chat({ messages: [{ role: 'user', content: '嗨' }] })
 
+/** 走完全部退避档位所需的虚拟时间。 */
+const TOTAL_BACKOFF = BACKOFF_MS.reduce((a, b) => a + b, 0)
+
 beforeEach(() => {
   resetUsage()
   fetchMock = vi.fn()
@@ -22,56 +25,82 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-describe('thinking 参数与它的兜底（Bug 3b）', () => {
-  it('正常请求带 thinking:{type:"disabled"}', async () => {
+describe('请求体', () => {
+  it('用 DashScope 的模型名', async () => {
     fetchMock.mockResolvedValue(ok())
     await call()
-    expect(bodyOf(0).thinking).toEqual({ type: 'disabled' })
+    expect(bodyOf(0).model).toBe(MODEL)
   })
 
-  it('服务端对 thinking 返回 400 时，去掉该参数重试一次并成功', async () => {
-    fetchMock.mockResolvedValueOnce(fail(400)).mockResolvedValueOnce(ok())
-    const r = await call()
-    expect(r.content).toBe('好的')
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(bodyOf(0).thinking).toEqual({ type: 'disabled' })
-    expect(bodyOf(1).thinking).toBeUndefined()
-    // 其余字段保持不变
-    expect(bodyOf(1).model).toBe(bodyOf(0).model)
-    expect(bodyOf(1).messages).toEqual(bodyOf(0).messages)
+  it('不再发送 thinking 参数（智谱专有，DashScope 不认）', async () => {
+    fetchMock.mockResolvedValue(ok())
+    await call()
+    expect(bodyOf(0).thinking).toBeUndefined()
   })
 
-  it('去掉 thinking 后仍失败则如实抛错，不无限重试', async () => {
-    fetchMock.mockResolvedValue(fail(400))
-    await expect(call()).rejects.toBeInstanceOf(LlmUnavailable)
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+  it('jsonMode 映射成 response_format', async () => {
+    fetchMock.mockResolvedValue(ok())
+    await chat({ messages: [{ role: 'user', content: '嗨' }], jsonMode: true })
+    expect(bodyOf(0).response_format).toEqual({ type: 'json_object' })
   })
 
-  it('5xx 不触发去 thinking 的重试（那不是参数问题）', async () => {
-    fetchMock.mockResolvedValue(fail(503))
-    await expect(call()).rejects.toBeInstanceOf(LlmUnavailable)
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+  it('有 tools 时带上 tool_choice:auto；没有则两个字段都不出现', async () => {
+    fetchMock.mockResolvedValue(ok())
+    await chat({ messages: [{ role: 'user', content: '嗨' }], tools: [{ type: 'function' }] })
+    expect(bodyOf(0).tool_choice).toBe('auto')
+    await call()
+    expect(bodyOf(1).tools).toBeUndefined()
+    expect(bodyOf(1).tool_choice).toBeUndefined()
   })
 })
 
-describe('限流与真断网的区分（Bug 3a）', () => {
-  it('429 抛 LlmRateLimited，并退避重试一次', async () => {
+describe('推理模型的 reasoning_content', () => {
+  it('被剥掉，不会回传给上游污染下一轮 messages', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => ({ choices: [{ message: {
+        role: 'assistant', content: '好的', reasoning_content: '一大段思考过程',
+        tool_calls: [{ id: 'c1', type: 'function', function: { name: 'f', arguments: '{}' } }],
+      } }] }),
+    })
+    const r = await call()
+    expect((r as unknown as Record<string, unknown>).reasoning_content).toBeUndefined()
+    // tool_calls 必须原样保留，执行器完全依赖它
+    expect(r.tool_calls?.[0].function.name).toBe('f')
+    expect(r.content).toBe('好的')
+  })
+})
+
+describe('限流与真断网的区分', () => {
+  it('429 指数退避重试，用尽档位后抛 LlmRateLimited', async () => {
     vi.useFakeTimers()
     fetchMock.mockResolvedValue(fail(429))
     const p = call().catch(e => e)
-    await vi.advanceTimersByTimeAsync(6000)
-    const e = await p
-    expect(e).toBeInstanceOf(LlmRateLimited)
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(TOTAL_BACKOFF)
+    expect(await p).toBeInstanceOf(LlmRateLimited)
+    // 首次 + 每个退避档位各重试一次
+    expect(fetchMock).toHaveBeenCalledTimes(BACKOFF_MS.length + 1)
   })
 
-  it('429 后重试成功则正常返回，且不会退化成去掉 thinking', async () => {
+  it('429 后某次重试成功则正常返回', async () => {
     vi.useFakeTimers()
     fetchMock.mockResolvedValueOnce(fail(429)).mockResolvedValueOnce(ok())
     const p = call()
-    await vi.advanceTimersByTimeAsync(6000)
+    await vi.advanceTimersByTimeAsync(TOTAL_BACKOFF)
     expect((await p).content).toBe('好的')
-    expect(bodyOf(1).thinking).toEqual({ type: 'disabled' })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('非 429 的 4xx 不重试（那不是限流，重试只会更慢）', async () => {
+    fetchMock.mockResolvedValue(fail(400))
+    await expect(call()).rejects.toBeInstanceOf(LlmUnavailable)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('5xx 不重试', async () => {
+    fetchMock.mockResolvedValue(fail(503))
+    await expect(call()).rejects.toBeInstanceOf(LlmUnavailable)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('LlmRateLimited 是 LlmUnavailable 的子类，上层旧的 catch 仍然生效', () => {
@@ -79,7 +108,7 @@ describe('限流与真断网的区分（Bug 3a）', () => {
   })
 })
 
-describe('用量统计（Bug 3d）', () => {
+describe('用量统计', () => {
   it('成功调用累加 usage，resetUsage 清零', async () => {
     fetchMock.mockResolvedValue(ok())
     await call(); await call()

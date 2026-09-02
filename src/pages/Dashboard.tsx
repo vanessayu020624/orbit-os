@@ -1,4 +1,3 @@
-import { useEffect } from 'react'
 import { useStore } from '../lib/store'
 import { buildRiskCards } from '../lib/risk'
 import { RiskCards } from './dashboard/RiskCards'
@@ -8,15 +7,14 @@ import { StatusPieChart } from './dashboard/StatusPieChart'
 import { ShipmentTrendChart } from './dashboard/ShipmentTrendChart'
 
 export default function Dashboard() {
-  const { db, currentUser, tick } = useStore()
+  const { db, currentUser } = useStore()
 
-  // 4 秒一次的「实时」演示跳动：随机推进订单/回款，让看板显得在动。
-  // tick 是 zustand store 里定义一次的稳定函数引用，effect 只在挂载/卸载时触发一次，
-  // 卸载（切换页面）时务必清掉定时器，否则页面来回切换会攒出多个 interval、越切越快。
-  useEffect(() => {
-    const timer = setInterval(tick, 4000)
-    return () => clearInterval(timer)
-  }, [tick])
+  // 这里曾有一个 4 秒一次的 tick()，随机把一张待发货订单推成已发货、或把一笔应收标记回款，
+  // 目的是让看板「显得在动」。移除原因不是它有 bug，而是它把演示的可信度换掉了：
+  //   1. 数字无缘无故变化（实测 35→34→31、62→66），看的人只会判断成数据错乱；
+  //   2. 与 replay.ts 开头明确承诺的「录播与真实模式数字不穿帮」的确定性直接冲突；
+  //   3. 32 张可推进订单约 3.6 分钟耗尽，讲久一点数据就见底。
+  // 现在数据全程静止，屏幕上任何数字变化都只可能来自 Agent 的写操作，且能在审计日志里对上。
 
   const cards = buildRiskCards(db, currentUser)
 

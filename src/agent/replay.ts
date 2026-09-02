@@ -2,7 +2,7 @@ import type { AgentEvent, PurchaseOrder, Role, User } from '../lib/types'
 import { useStore } from '../lib/store'
 import { ROLE_META } from '../lib/rbac'
 
-// 断网兜底：/api/chat 不可达时的两条剧本，事件序列与措辞按真实 GLM 输出的格式手写，
+// 断网兜底：/api/chat 不可达时的两条剧本，事件序列与措辞按真实模型输出的格式手写，
 // tool_result 的数字直接取自 generateSeed(42) 的确定性结果（见 P4 报告的验证脚本），
 // 保证录播模式与真实模式在演示现场切换时数字不穿帮。
 

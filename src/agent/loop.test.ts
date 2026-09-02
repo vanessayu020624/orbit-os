@@ -163,6 +163,37 @@ describe('空计划只发一张卡（Bug 2d）', () => {
   })
 })
 
+describe('能力边界引导：空计划走 reply 而不是 goal', () => {
+  const rawPlan = (o: Record<string, unknown>) =>
+    ({ role: 'assistant', content: JSON.stringify({ needsWrite: false, steps: [], ...o }) })
+
+  it('有 reply 时展示 reply——goal 是计划卡标题，不该被当成对话正文', async () => {
+    script(rawPlan({ goal: '分析A区上月销售额下滑原因', reply: '这类归因我做不了，但我能帮你查…' }))
+    const events: AgentEvent[] = []
+    await run(userNamed('张伟'), events)
+    const final = events.find(e => e.type === 'final')!
+    // 关键回归点：goal 复述了问题，直接展示等于答非所问。
+    expect(final).toMatchObject({ text: '这类归因我做不了，但我能帮你查…' })
+  })
+
+  it('模型漏了 reply 时退回 goal，不能因为字段缺失就吐兜底话术', async () => {
+    script(rawPlan({ goal: '当前角色无权查看应收账款，请联系销售总监。' }))
+    const events: AgentEvent[] = []
+    await run(userNamed('张伟'), events)
+    expect(events.find(e => e.type === 'final')).toMatchObject(
+      { text: '当前角色无权查看应收账款，请联系销售总监。' })
+  })
+
+  it('reply 与 goal 都空时兜底，且兜底文案不得把能力外说成权限外', async () => {
+    script(rawPlan({ goal: '', reply: '   ' }))
+    const events: AgentEvent[] = []
+    await run(userNamed('张伟'), events)
+    const final = events.find(e => e.type === 'final') as { text: string }
+    expect(final.text).not.toContain('无权')
+    expect(final.text).toContain('你可以问我')
+  })
+})
+
 describe('会话历史穿进 prompt（Bug 2b）', () => {
   it('history 同时出现在 planner 与 executor 的 system prompt 里', async () => {
     script(

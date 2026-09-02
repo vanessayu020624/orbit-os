@@ -70,7 +70,13 @@ export type Mutation =
 
 // ---- Agent 契约 ----
 export interface PlanStep { id: string; title: string; expectedTools: string[] }
-export interface Plan { goal: string; steps: PlanStep[]; needsWrite: boolean }
+/**
+ * reply 只在 steps 为空时有值：规划器判定「做不了」时写给用户看的边界引导话术。
+ * 与 goal 分开是因为二者受众不同——goal 是计划卡标题，reply 是对话正文。
+ * 曾经共用 goal 一个字段，结果是「让它当标题」和「让它当引导语」两条指令互相打架，
+ * 实测强化任一条都会压掉另一条。拆字段是唯一稳定的解法。
+ */
+export interface Plan { goal: string; steps: PlanStep[]; needsWrite: boolean; reply?: string }
 
 export type AgentEvent =
   | { type: 'plan'; plan: Plan }

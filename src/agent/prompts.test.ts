@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { generateSeed } from '../lib/seed'
 import { plannerPrompt, executorPrompt } from './prompts'
 import type { Plan } from '../lib/types'
+import { restrictedCatalogText } from './registry'
 
 const db = generateSeed(42)
 const wangQiang = db.users.find(u => u.name === '王强')!
@@ -44,5 +45,28 @@ describe('追问与写操作的提示词硬约束（Bug 1a / 2a）', () => {
     expect(p).toContain('写操作必须真的执行')
     expect(p).toContain('create_purchase_order')
     expect(p).not.toContain('最后给 1 到 2 条可执行建议')
+  })
+})
+
+describe('能力边界与权限边界必须能被区分', () => {
+  const rep = db.users.find(u => u.role === 'sales_rep')!
+
+  it('规划器提示词里同时给出「我能做的」和「系统有但我无权的」', () => {
+    const p = plannerPrompt(rep)
+    // 只喂本角色工具时，模型会把「你无权」说成「系统不支持」——实测复现过。
+    expect(p).toContain('query_sales_orders')
+    expect(p).toContain('query_receivables')
+    expect(p).toContain('销售总监')
+  })
+
+  it('无权清单不把本角色已有的工具列进去', () => {
+    const r = restrictedCatalogText('sales_rep')
+    expect(r).not.toContain('query_sales_orders:')
+    expect(r).toContain('query_receivables:')
+  })
+
+  it('CEO 拥有全部能力，无权清单为空态而不是半截列表', () => {
+    expect(restrictedCatalogText('ceo')).toContain('无')
+    expect(restrictedCatalogText('ceo')).not.toContain('- ')
   })
 })

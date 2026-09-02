@@ -45,7 +45,10 @@ export async function runAgent(o: RunAgentOptions): Promise<void> {
   // 空计划时 plan.goal 会同时渲染成计划卡标题和 final 卡，同一句话在屏幕上出现两遍。
   // 所以先判空、只发 final；有步骤时才发计划卡。
   if (!plan.steps.length) {
-    o.emit({ type: 'final', text: plan.goal || '当前角色无权处理该请求。', refs: [] })
+    // 空 steps 是规划器认定「做不了」的信号，reply 里装的是它写好的边界引导话术。
+    // 兜底文案不能说「无权处理」——能力外和权限外是两回事，说错了是误导。
+    o.emit({ type: 'final', text: plan.reply?.trim() || plan.goal?.trim()
+      || '这个问题我暂时没有对应的数据能力。你可以问我客户、商机、订单、库存、采购或应收方面的具体情况。', refs: [] })
     return
   }
   o.emit({ type: 'plan', plan })
@@ -56,7 +59,7 @@ export async function runAgent(o: RunAgentOptions): Promise<void> {
     { role: 'user', content: o.question },
   ]
   const tools = toolSchemasFor(o.user.role)
-  // 本角色可用的写入工具名集合。CEO 没有写工具 → 集合为空 → 永远不会补推。
+  // 本角色可用的写入工具名集合。用于判断「计划里有写入步骤但模型没调用」，只在这时才补推。
   const writeToolNames = new Set(
     toolsFor(o.user.role).filter(t => t.isWrite).map(t => t.name)
   )

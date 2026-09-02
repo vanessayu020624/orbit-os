@@ -11,7 +11,6 @@ interface State {
   applyMutation: (m: Mutation) => void
   pushAudit: (e: AuditEntry) => void
   reset: () => void
-  tick: () => void
 }
 
 const initDb = generateSeed(42)
@@ -60,18 +59,4 @@ export const useStore = create<State>((set, get) => ({
   }),
 
   reset: () => set({ db: generateSeed(42), auditLog: [] }),
-
-  // 演示用「实时」跳动：每次调用随机推进一张待发货订单为已发货，或给一笔应收回款。
-  // ⚠️ 必须排除 SO-P* 开头的埋雷订单，否则它们会被自动推进导致风险卡自己消失，没法演示 Agent 干预。
-  tick: () => set(s => {
-    const db = structuredClone(s.db)
-    const cand = db.orders.filter(o => o.status === '待发货' && !o.id.startsWith('SO-P'))
-    if (cand.length && Math.random() < 0.6) {
-      cand[Math.floor(Math.random() * cand.length)].status = '已发货'
-    } else {
-      const ar = db.receivables.find(r => r.status === '未到期')
-      if (ar) { ar.status = '已回款'; ar.paidAmount = ar.amount }
-    }
-    return { db }
-  }),
 }))

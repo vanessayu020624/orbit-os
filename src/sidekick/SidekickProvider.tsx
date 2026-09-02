@@ -233,14 +233,17 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
       const scene = pickScene(q)
       // 真实卡片已经 emit 过一部分，录播从这里接管，必须有肉眼可见的分界。
       updateItems(targetId, p => [...p, { k: 'divider', text: limited
-        ? '模型并发已满（1302），以下为录播内容'
-        : '模型连接失败，以下为录播内容' }])
+        ? '模型限流，以下为预置演示内容'
+        : '模型连接失败，以下为预置演示内容' }])
       if (scene) {
         await runReplay(scene, askUser, emit, (id) => confirmFn(id))
       } else {
+        // 没有匹配场景时，用户拿到的是一次纯粹的失败。文案只说两件事：
+        // 出了什么事（用他能懂的话）、他现在能做什么。不报内部错误码、不提「录播场景」——
+        // 那是实现细节，说出来只会让人觉得能力是假的。
         updateItems(targetId, p => [...p, { k: 'error', text: limited
-          ? '智谱免费档并发上限为 2 路，当前已占满（错误码 1302），且这个问题不在录播的两个场景内。稍等几秒重试即可。'
-          : '当前无法连接模型，且这个问题不在录播的「交期风险排查」与「权限差异」两个场景内。' }])
+          ? '模型调用太密集被限流了，等几秒再问一次就行。这期间可以先在左侧看客户、订单、库存的实时数据。'
+          : '暂时连不上模型，请稍后重试。左侧的客户、商机、订单、库存、应收数据不依赖模型，现在就能查。' }])
       }
     } finally {
       // 只有当前角色仍然是发起这次提问的角色时，才把这一轮写进历史。见 shouldRecordTurn。
