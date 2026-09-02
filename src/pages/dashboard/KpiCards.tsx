@@ -3,7 +3,7 @@ import { scopeOrders, scopeReceivables } from '../../lib/rbac'
 import { countDeliveryRiskOrders } from '../../lib/risk'
 import { money } from '../../lib/format'
 
-interface Kpi { title: string; value: string; note: string }
+interface Kpi { title: string; value: string; note: string; alert?: 'high' | 'medium' }
 
 // Ruling T5-A：第三张 KPI 卡从「库存告警 SKU」改为「交期风险订单」，
 // 与 buildRiskCards 共用 countDeliveryRiskOrders 的 14 天窗口口径，
@@ -23,9 +23,13 @@ function computeKpis(db: DbSnapshot, user: User): Kpi[] {
     { title: '本月营收', value: user.role === 'supply_chain' ? '***' : money(revenue),
       note: `${revenueOrders.length} 张已发货 / 已完成订单` },
     { title: '待发货订单', value: String(pendingShip), note: '当前处于待发货状态的订单数' },
-    { title: '交期风险订单', value: String(riskOrders), note: '未来 14 天内存在缺货风险' },
+    // 这两项非零时给数字上色，是为了让上方风险卡讲的那件事在 KPI 行里也能被一眼找到。
+    // 四张同色卡片并排时，「3」和「2566.9 万」在视觉上一样重，而它们的紧迫程度差着量级。
+    { title: '交期风险订单', value: String(riskOrders), note: '未来 14 天内存在缺货风险',
+      alert: riskOrders > 0 ? 'high' : undefined },
     { title: '逾期应收', value: canSeeAr ? money(overdueAmt) : '—',
-      note: canSeeAr ? `${overdue.length} 笔已逾期` : '仅销售总监 / CEO 可见' },
+      note: canSeeAr ? `${overdue.length} 笔已逾期` : '仅销售总监 / CEO 可见',
+      alert: canSeeAr && overdue.length > 0 ? 'medium' : undefined },
   ]
 }
 
@@ -36,7 +40,10 @@ export function KpiCards({ db, user }: { db: DbSnapshot; user: User }) {
       {kpis.map(k => (
         <div key={k.title} className="bg-white rounded-lg border shadow-sm p-4">
           <div className="text-xs text-slate-400">{k.title}</div>
-          <div className="text-2xl font-semibold mt-1 transition-all duration-500">{k.value}</div>
+          <div className={`text-2xl font-semibold mt-1 transition-all duration-500
+                           ${k.alert === 'high' ? 'text-danger' : k.alert === 'medium' ? 'text-warn' : ''}`}>
+            {k.value}
+          </div>
           <div className="text-xs text-slate-400 mt-1">{k.note}</div>
         </div>
       ))}

@@ -84,3 +84,34 @@
   （非 18 / 2）；风险卡「逾期超 60 天」实际是 5 笔 ¥353.4 万（seed 只埋了 2 笔，随机数据又凑出 3 笔）
 - ⚠️ Sidekick 切换角色不清空会话（spec §8 说要清空），剧本 C 的上下对照演示反而依赖这个行为，未改
 - README 三处截图位是中文占位不是图片标签（避免 GitHub 破图），拍摄清单见 docs/img/README.md
+
+## P8 完成 (2026-09-02) —— 结论区排版 / 窄屏 / 飞书推送
+- 结论区从 `whitespace-pre-wrap` 换成 `src/components/Markdown.tsx`（自写，不引 react-markdown）。
+  支持加粗、有序 / 无序列表、# 到 #### 标题、行内代码、表格、分隔线，其余语法原样落成正文。
+  依据是 15 条真实端到端结论里的实际用量：加粗 23 / 无序列表 67 行 / 有序 7 行 / 标题 15 行 /
+  行尾双空格 64 行 / 表格 0（表格仍实现了，因为漏斗类问题随时可能吐一张，现场出一排竖线更糟）
+- ⚠️ 必须记住的顺序：`splitInline()` **先切 `[[编号]]`、再切加粗与行内代码**。反过来
+  `**[[AR-002]]**` 会在星号处断开，引用被劈成两半、chip 不成立，整条溯源链废掉。
+  唯一例外是加粗横跨引用（`**共 [[AR-002]] 笔**`）：两种顺序都不对，单独先摘星号再切引用。
+  这条已用 `Markdown.test.ts` 的 14 条用例钉死，改这个文件前先跑它
+- `RefChip.tsx` 的 `renderWithRefs()` 已删除（唯一调用者 FinalAnswer 改用 `<Markdown>`）。
+  旧文档里提到它的地方已同步改掉；P4 那条历史记录保持原样，它记的是当时的事实
+- 首屏视觉层级：风险卡改成 severity 着色底 + 实色 CTA + 「星轨主动发现 · 无需提问」小标题；
+  KPI 的「交期风险订单」「逾期应收」非零时数字上色。改动理由写在 RiskCards.tsx 文件头注释里
+- 新增 `src/components/NarrowScreenGate.tsx`：< 1024px 换成说明卡而非降级布局，
+  纯谓词 `shouldBlock(width, bypassed)` 单独导出可测。只套在 `/*` 业务路由外面，`/selftest` 不拦
+- 新增 `functions/api/notify.ts` + `src/components/NotifyButton.tsx`：风险卡一键推飞书群机器人。
+  webhook 地址与加签密钥只存在于 Cloudflare 环境变量（`FEISHU_WEBHOOK_URL` /
+  `FEISHU_WEBHOOK_SECRET`），前端和仓库都拿不到
+- ⚠️ 坑：飞书对失败的推送照样回 HTTP 200，真正结果在 body 的 `code`（新版）或 `StatusCode`
+  （旧版）里。只看 `upstream.ok` 会把签名失败当成推送成功。已按两套字段名都读
+- ⚠️ 坑：加签是以 `timestamp + "\n" + secret` 作 HMAC **密钥**、空串作消息体，和直觉相反；
+  写反了飞书只回一句 19021 sign match fail。用 Web Crypto 不用 node:crypto（Workers 没有后者）
+- ⚠️ 坑（与之前记录不符，以此为准）：`tsconfig.json` 的 references 里**包含**
+  `./functions/tsconfig.json`，所以 `tsc -b` 会扫 `functions/`；vitest 的 include 也覆盖它。
+  把纯函数挪到 `src/lib/` 再从 functions import 会触发 TS6307，别试
+- 验收：`npm run build` 0 错误；`npm test` 16 文件 236 用例全绿；`npm run lint` 11 条 warning
+  （全是 `react/only-export-components`，与 SidekickProvider / StatusChip 同类，本期新增 2 条来自
+  Markdown.tsx 导出的两个纯函数——为可测性刻意保留，与项目既有做法一致）
+- 未做：端到端回归本期没重跑（只改渲染层与新增旁路功能，未动 prompts.ts / loop.ts）。
+  下次改提示词或 agent/loop.ts 时按 README 的命令补跑

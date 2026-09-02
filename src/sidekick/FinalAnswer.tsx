@@ -1,4 +1,4 @@
-import { renderWithRefs } from '../components/RefChip'
+import { Markdown } from '../components/Markdown'
 import { useStore } from '../lib/store'
 import { resolveRef } from '../lib/refLookup'
 
@@ -12,9 +12,7 @@ export function FinalAnswer({ text, refs }: { text: string; refs: string[] }) {
 
   return (
     <div className="rounded-lg border-l-[3px] border-l-brand bg-white border p-3">
-      <div className="text-sm leading-relaxed text-slate-800 whitespace-pre-wrap">
-        {renderWithRefs(text)}
-      </div>
+      <Markdown text={text} />
       {refs.length > 0 && (
         <div className="mt-2.5 pt-2.5 border-t text-[11px] text-slate-400">
           {verified.length > 0 && `本结论引用了 ${verified.length} 条记录，点击标签可跳转核对`}

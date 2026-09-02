@@ -39,11 +39,3 @@ export function RefChip({ id }: { id: string }) {
     </button>
   )
 }
-
-/** 把 [[XXX]] 渲染成可点击 chip。未被标注的数字保持原样。 */
-export function renderWithRefs(text: string) {
-  return text.split(/(\[\[[^\]]+\]\])/g).map((seg, i) => {
-    const m = seg.match(/^\[\[([^\]]+)\]\]$/)
-    return m ? <RefChip key={i} id={m[1]} /> : <span key={i}>{seg}</span>
-  })
-}

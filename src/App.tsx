@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { AppShell } from './components/AppShell'
+import { NarrowScreenGate } from './components/NarrowScreenGate'
 import Dashboard from './pages/Dashboard'
 import Customers from './pages/Customers'
 import Opportunities from './pages/Opportunities'
@@ -33,21 +34,25 @@ export default function App() {
           <Route
             path="/*"
             element={
-              <AppShell sidekick={<Sidekick />}>
-                <Routes>
-                  <Route path="/" element={<Dashboard />} />
-                  <Route path="/customers" element={<Customers />} />
-                  <Route path="/opportunities" element={<Opportunities />} />
-                  <Route path="/orders" element={<Orders />} />
-                  <Route path="/inventory" element={<Inventory />} />
-                  <Route path="/purchases" element={<Purchases />} />
-                  <Route path="/receivables" element={<Receivables />} />
-                  <Route path="/agent" element={<AgentPage />} />
-                  {/* 没有这条兜底时，任何打错的地址都渲染成一片空白——外壳在、内容区空，
-                      看的人分不清是路由错了还是页面崩了。实探时就是这样丢了一次信任。 */}
-                  <Route path="*" element={<NotFound />} />
-                </Routes>
-              </AppShell>
+              // 三栏工作台在 1024px 以下必破版，宁可换成一张讲清取舍的说明卡。
+              // 只套在业务外壳外面：/selftest 是部署连通性验证页，本来就可能在手机上打开。
+              <NarrowScreenGate>
+                <AppShell sidekick={<Sidekick />}>
+                  <Routes>
+                    <Route path="/" element={<Dashboard />} />
+                    <Route path="/customers" element={<Customers />} />
+                    <Route path="/opportunities" element={<Opportunities />} />
+                    <Route path="/orders" element={<Orders />} />
+                    <Route path="/inventory" element={<Inventory />} />
+                    <Route path="/purchases" element={<Purchases />} />
+                    <Route path="/receivables" element={<Receivables />} />
+                    <Route path="/agent" element={<AgentPage />} />
+                    {/* 没有这条兜底时，任何打错的地址都渲染成一片空白——外壳在、内容区空，
+                        看的人分不清是路由错了还是页面崩了。实探时就是这样丢了一次信任。 */}
+                    <Route path="*" element={<NotFound />} />
+                  </Routes>
+                </AppShell>
+              </NarrowScreenGate>
             }
           />
         </Routes>
