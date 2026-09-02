@@ -1,12 +1,7 @@
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import type { DbSnapshot, User } from '../../lib/types'
 import { scopeOrders } from '../../lib/rbac'
-import { ORDER_TONE } from '../../components/StatusChip'
-
-// StatusChip 只导出 Tailwind 类名（Tone），图表需要真实色值，这里与 tailwind.config.js 的自定义色保持一致。
-const TONE_HEX: Record<string, string> = {
-  ok: '#00c875', warn: '#fdab3d', danger: '#e2445c', info: '#0073ea', idle: '#c4c4c4',
-}
+import { sliceColor } from './orderPalette'
 
 export function StatusPieChart({ db, user }: { db: DbSnapshot; user: User }) {
   const orders = scopeOrders(db, user)
@@ -22,11 +17,15 @@ export function StatusPieChart({ db, user }: { db: DbSnapshot; user: User }) {
       ) : (
         <ResponsiveContainer width="100%" height={220}>
           <PieChart>
-            <Pie data={data} dataKey="count" nameKey="status" innerRadius={40} outerRadius={75}>
-              {data.map(d => <Cell key={d.status} fill={TONE_HEX[ORDER_TONE[d.status] ?? 'idle']} />)}
+            {/* 描白边 + 留缝：六块扇区里有两组是相邻色相，不分隔的话边界会糊在一起。 */}
+            <Pie data={data} dataKey="count" nameKey="status" innerRadius={40} outerRadius={75}
+              paddingAngle={2} stroke="#fff" strokeWidth={2}>
+              {data.map(d => <Cell key={d.status} fill={sliceColor(d.status)} />)}
             </Pie>
-            <Tooltip />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
+            <Tooltip formatter={(v, n) => [`${v} 张`, String(n)]} />
+            {/* 图例带上条数：颜色分得开是底线，但不该让人只靠颜色去对。 */}
+            <Legend wrapperStyle={{ fontSize: 12 }}
+              formatter={(value: string) => `${value} ${counts.get(value) ?? 0}`} />
           </PieChart>
         </ResponsiveContainer>
       )}

@@ -2,7 +2,7 @@
  * 打真实模型的端到端回归。不进 `npm test`——要外网、要几分钟、结果不确定，
  * 放进单元测试会让 CI 变成一个看天吃饭的东西。
  *
- * 它是改提示词或改 agent/loop.ts 之后的**手动验收关卡**：12 条预置问题 + 2 条边界问题
+ * 它是改提示词或改 agent/loop.ts 之后的**手动验收关卡**：13 条预置问题 + 2 条边界问题
  * 各跑一遍完整链路（规划 → function calling → 工具执行 → 结论），逐条核对结论里每一个
  * [[编号]] 能不能用 resolveRef 在数据库里查到。核不上就是用户点下去会扑空的死链。
  *
@@ -32,7 +32,7 @@ globalThis.fetch = ((url: any, init: any) =>
 const SCENARIOS: { id: string; role: Role; q: string; followup?: string }[] = [
   { id: 'rep-1', role: 'sales_rep', q: '我手上有哪些待发货订单有交付风险？' },
   { id: 'rep-2', role: 'sales_rep', q: '我这个月的商机漏斗情况怎么样？' },
-  { id: 'rep-3', role: 'sales_rep', q: '帮我给华宁自动化建一个下周的回访任务' },
+  { id: 'rep-3', role: 'sales_rep', q: '帮我给汇川设备建一个下周的回访任务' },
   { id: 'dir-1', role: 'sales_director', q: '团队里逾期超过 30 天的应收有哪些？' },
   { id: 'dir-2', role: 'sales_director', q: '本月团队的营收和商机漏斗怎么样？' },
   { id: 'dir-3', role: 'sales_director', q: '未来两周要交付的订单有风险吗？' },
@@ -40,6 +40,7 @@ const SCENARIOS: { id: string; role: Role; q: string; followup?: string }[] = [
     followup: '刚才那两张有风险的订单，除了 SKU-203 还缺别的料吗？' },
   { id: 'sc-2', role: 'supply_chain', q: 'SKU-203 库存够不够？在途采购什么时候到？' },
   { id: 'sc-3', role: 'supply_chain', q: '帮我把缺口最大的那个 SKU 的库存预留出来' },
+  { id: 'sc-4', role: 'supply_chain', q: '伺服电机还有多少库存？' },
   { id: 'ceo-1', role: 'ceo', q: '公司最大的客户是谁？' },
   { id: 'ceo-2', role: 'ceo', q: '本月全公司的营收、商机漏斗和逾期应收情况' },
   { id: 'ceo-3', role: 'ceo', q: '未来两周的交付风险，需要的话直接下加急采购单' },
