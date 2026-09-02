@@ -1,0 +1,9 @@
+# 复制为 .dev.vars —— 这是 wrangler pages dev 读的文件，不是 .env.local。
+# Pages Function 跑在 workers 运行时里，拿不到 vite 的 .env.local，
+# 本地想真发一条飞书消息就得配这个（.dev.vars 已在 .gitignore 里）。
+#
+#   npm run build && npx wrangler pages dev dist
+#
+DASHSCOPE_API_KEY=
+FEISHU_WEBHOOK_URL=
+FEISHU_WEBHOOK_SECRET=

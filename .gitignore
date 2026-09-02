@@ -29,3 +29,6 @@ node_modules
 dist
 .wrangler
 *.tsbuildinfo
+
+# wrangler pages dev 的本地环境变量，里面是飞书 webhook 地址和加签密钥
+.dev.vars
