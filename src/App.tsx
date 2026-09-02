@@ -37,8 +37,8 @@ export default function App() {
           <Route
             path="/*"
             element={
-              // 三栏工作台在 1024px 以下必破版，宁可换成一张讲清取舍的说明卡。
-              // 只套在业务外壳外面：/selftest 是部署连通性验证页，本来就可能在手机上打开。
+              // 按宽度分发外壳：手机走 MobileApp（问答优先），768~1023 换说明卡，够宽才是三栏工作台。
+              // 只套在业务外壳外面：/selftest 是部署连通性验证页，不需要这层分发。
               <NarrowScreenGate>
                 <AppShell sidekick={<Sidekick />}>
                   <Routes>

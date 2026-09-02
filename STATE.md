@@ -168,3 +168,46 @@
 ### 验收
 
 `npm run build` 0 错误；`npm test` **20 文件 340 用例全绿**（基线 16/236）；`npm run lint` 仍 11 条 warning，无新增。
+
+## P10 完成 (2026-09-03) —— 歧义澄清闸 + 移动端外壳
+
+### 新增
+
+- `src/agent/clarify.ts` + 测试（32 条）——澄清闸。两层：确定性规则预检（零模型开销）+ 规划器语义判定。
+- `src/sidekick/ClarifyCard.tsx`——三态卡（待选 / 已选 / 已按兜底继续）。
+- `src/sidekick/ItemView.tsx`——把对话项渲染从 `Sidekick.tsx` 抽出来，桌面与移动共用同一批卡片。
+- `src/lib/viewport.ts` + 测试（4 条）——`pickShell(width,bypassed)` 三档分发：mobile / gate / desktop。
+- `src/lib/recordLookup.ts` + 测试（9 条）——把一个 `[[编号]]` 展开成详情卡的字段列表。
+- `src/mobile/`：`MobileApp` / `MobileChat` / `MobileData` / `DetailSheet` / `dataCards.ts`（6 条测试）。
+- `src/components/RefNav.tsx`——context，让外壳决定点 `[[编号]]` 是跳页面还是推详情卡。
+
+### 关键决策
+
+1. **语义澄清搭规划器的顺风车**，`Plan` JSON 多一个 `clarify` 字段，而不是单开一次分类器调用。
+   后者会让**每个问题**都多付一次往返；现在只有真触发澄清才多付一次重新规划，规则命中则零开销。
+2. **硬闸但最多一轮**（`askedClarify` 一次性），且 `fallback` 是必填——`fromPlanClarify` 没有 `assume`
+   直接返回 null。一个能被卡死的 Agent 比一个偶尔猜错的 Agent 难用得多。
+3. **服务端（飞书）没有 `requestClarify`**，所以恒走兜底分支。口径在结论正文（`assumptionBlock`）
+   和卡片脚注（`ServerRunResult.assumption`）各说一次——正文靠模型不保证，脚注是确定性的。
+4. **移动端是另一套 IA，不是响应式收缩**。共用数据 / 权限 / 全部对话卡片组件，只有布局是两套。
+   `[[编号]]` 在手机上从底部推详情卡而不是跳页面：跳走等于把用户踢出对话。
+5. **< 768 不再拦**，768~1023 保留说明卡。`shouldBlock` 保留导出（= `pickShell(...)==='gate'`），
+   老的 4 条测试原样通过。
+
+### 踩的坑
+
+1. **规则层的误拦比漏拦危险得多**。第一版用平铺的代词词表 + `[一-龥]{2,}` 连续中文串，会把内置预置问题
+   「我这个月的商机漏斗情况怎么样？」按「这个」拦下来，也会把「缺口最大的那个 SKU」拦下来。
+   改成：代词后面必须跟业务名词、前面是「的」则不算悬空；多实体匹配改成枚举 2~8 字子串并排除
+   已完整拼出的实体名、只保留极大片段。**并加了一组回归测试**：全部预置问题 + 全部风险卡问题
+   逐条断言不被误拦（唯一豁免是 CEO 的「公司最大的客户是谁？」，那是刻意留的演示素材）。
+2. **`functions/tsconfig.json` 的 include 是逐文件列的**，新增 `clarify.ts` 后 `tsc -b` 报 TS6307。
+   这份清单是护栏不是负担，见 P9 的同一条。
+3. **明细行里的 `skuId` 是产品内部主键（`P-054`），不是对外 `SKU-154`**。详情卡的「关联记录」
+   直接把它挂上去会得到一排点不动的死 chip——和结论里引用内部主键是同一个老问题。
+   `recordLookup.test.ts` 里加了一条硬断言：`related` 里每一个都必须能被 `resolveRef` 解析。
+
+### 验收
+
+`npm run build` 0 错误；`npm test` **24 文件 392 用例全绿**（基线 20/340）；
+`npm run lint` 12 条 warning（+1，`RefNav.tsx` 的 fast-refresh 告警，与既有 11 条同类）。

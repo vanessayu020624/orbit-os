@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../lib/store'
 import { resolveRef } from '../lib/refLookup'
+import { useRefNav } from './RefNav'
 
 /**
  * 结论里的溯源标签。
@@ -15,6 +16,7 @@ import { resolveRef } from '../lib/refLookup'
  */
 export function RefChip({ id }: { id: string }) {
   const nav = useNavigate()
+  const openRef = useRefNav()
   const { db, currentUser } = useStore()
   const target = resolveRef(db, currentUser, id)
 
@@ -31,8 +33,10 @@ export function RefChip({ id }: { id: string }) {
 
   return (
     <button
-      onClick={() => nav(`${target.route}?focus=${encodeURIComponent(target.focus)}`)}
-      title={`跳转到${target.kind}列表并定位 ${target.focus}`}
+      onClick={() => openRef
+        ? openRef(id)
+        : nav(`${target.route}?focus=${encodeURIComponent(target.focus)}`)}
+      title={openRef ? `查看${target.kind} ${target.focus}` : `跳转到${target.kind}列表并定位 ${target.focus}`}
       className="inline-flex items-center px-1.5 py-0.5 mx-0.5 rounded bg-brand/10 text-brand
                  text-xs font-mono hover:bg-brand/20 align-baseline">
       {id}

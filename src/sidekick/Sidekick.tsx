@@ -1,10 +1,7 @@
 import { useStore } from '../lib/store'
 import { ROLE_META } from '../lib/rbac'
 import { ALL_TOOLS, toolsFor } from '../agent/registry'
-import { PlanChecklist } from './PlanChecklist'
-import { ToolCallCard } from './ToolCallCard'
-import { ConfirmCard } from './ConfirmCard'
-import { FinalAnswer } from './FinalAnswer'
+import { ItemView } from './ItemView'
 import { presetsFor, useSidekick } from './SidekickProvider'
 import { ConversationBar } from './ConversationBar'
 import { ContextPanel } from './ContextPanel'
@@ -34,31 +31,7 @@ export function Sidekick() {
             我会先列出执行计划，再逐步调用工具，涉及数据变更时会先请你确认。
           </div>
         )}
-        {c.items.map((it, i) => {
-          switch (it.k) {
-            case 'user':  return <div key={i} className="text-sm bg-brand text-white rounded-lg px-3 py-2 ml-8">{it.text}</div>
-            case 'plan':  return <PlanChecklist key={i} plan={it.plan} states={c.steps} amendedIds={c.amended} />
-            case 'tool':  return <ToolCallCard key={i} {...it} />
-            case 'confirm': return <ConfirmCard key={i} {...it} onDecide={ok => c.decide(it.id, ok)} />
-            case 'final': return <FinalAnswer key={i} text={it.text} refs={it.refs} />
-            case 'error': return <div key={i} className="text-xs text-danger bg-danger/5 rounded p-2">{it.text}</div>
-            case 'retry': return (
-              <div key={i} className="text-xs bg-slate-50 border rounded p-2 space-y-1.5">
-                <div className="text-slate-500">{it.hint}</div>
-                <button onClick={() => c.ask(it.q)} disabled={c.busy}
-                  className="px-2 py-1 rounded border text-slate-600 hover:border-brand hover:text-brand
-                             disabled:opacity-40">重新问一次</button>
-              </div>
-            )
-            case 'divider': return (
-              <div key={i} className="flex items-center gap-2 py-1">
-                <div className="flex-1 h-px bg-slate-200" />
-                <span className="text-[10px] text-slate-400 whitespace-nowrap">{it.text}</span>
-                <div className="flex-1 h-px bg-slate-200" />
-              </div>
-            )
-          }
-        })}
+        {c.items.map((it, i) => <ItemView key={i} item={it} />)}
       </div>
 
       <div className="border-t p-3 space-y-2">
