@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { AppShell } from './components/AppShell'
 import { NarrowScreenGate } from './components/NarrowScreenGate'
+import { DeepLink } from './components/DeepLink'
 import Dashboard from './pages/Dashboard'
 import Customers from './pages/Customers'
 import Opportunities from './pages/Opportunities'
@@ -28,6 +29,8 @@ export default function App() {
   return (
     <BrowserRouter>
       <SidekickProvider>
+        {/* 放在 Routes 外面：飞书回跳的 ?ask= 与落在哪个页面无关，不该被路由切换重置。 */}
+        <DeepLink />
         <Routes>
           {/* /selftest 独立于业务外壳之外：P0 部署连通性验证，不进左侧导航（见 Ruling T2-A） */}
           <Route path="/selftest" element={<SelfTest />} />

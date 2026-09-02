@@ -47,6 +47,22 @@ export const MODEL = 'qwen-plus'
 /** 单次请求超时上限。执行器最多 12 轮，超时只掐单轮，不是整次问询的上限。 */
 export const TIMEOUT_MS = 45000
 
+/**
+ * 上游代理的地址。浏览器里是相对路径 `/api/chat`，同源、由 Pages Function 转发。
+ *
+ * 做成可注入的，是因为飞书事件回调让同一份执行器要在 Worker 里再跑一遍，而 Worker 的
+ * fetch 没有「当前页面」这个基准，相对路径会直接抛 TypeError: Invalid URL。
+ * 服务端在入口处调一次 setChatEndpoint(new URL('/api/chat', request.url).toString()) 即可。
+ *
+ * 不改成「每次调用都传参」：那要穿透 loop.ts / summarize.ts / present.ts 三层签名，
+ * 而这个值在一个运行时里自始至终只有一个。模块级变量是这里最小的改动面。
+ */
+let chatEndpoint = '/api/chat'
+
+export function setChatEndpoint(url: string) { chatEndpoint = url }
+/** 仅供测试复原，别在业务代码里用。 */
+export function resetChatEndpoint() { chatEndpoint = '/api/chat' }
+
 export interface Usage { prompt_tokens: number; completion_tokens: number; total_tokens: number }
 
 /** 每次成功调用的用量。演示时用来现场报「这次问询花了多少 token」，也是文档里成本数据的来源。 */
@@ -85,16 +101,18 @@ async function chatOnce(opts: ChatOptions): Promise<ChatMessage> {
   const ctl = new AbortController()
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS)
   try {
-    const r = await fetch('/api/chat', {
+    const r = await fetch(chatEndpoint, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body), signal: ctl.signal,
     })
     if (r.status === 429) throw new LlmRateLimited('RATE_LIMIT')
     if (!r.ok) throw new LlmUnavailable(`HTTP ${r.status}`)
-    const j = await r.json()
+    // 必须显式标注返回体类型：DOM 里 Response.json() 是 any，Workers 运行时的类型定义里是 {}，
+    // 不标注的话这段在浏览器侧能编过、在飞书回调那侧编译直接失败。
+    const j = await r.json() as { choices?: { message?: unknown }[]; usage?: Usage }
     const msg = j?.choices?.[0]?.message
     if (!msg) throw new LlmUnavailable('响应缺少 choices')
-    if (j?.usage?.total_tokens && opts.countUsage !== false) usageLog.push(j.usage as Usage)
+    if (j.usage?.total_tokens && opts.countUsage !== false) usageLog.push(j.usage)
     return stripToChatMessage(msg as Record<string, unknown>)
   } catch (e) {
     if (e instanceof LlmUnavailable) throw e

@@ -54,7 +54,17 @@
 
 8. **失败就是失败，但失败要给出路。** LLM 超时 / 限流 / 断网 / 服务端报错分类成四种用户能据此行动的说法（`describeLlmError`），配一个可直接点的「重新问一次」，并指明左侧业务数据不依赖模型。早期版本在这里做过「录播模式」——预置事件流回放，除一个小角标外与真实执行毫无差别——已彻底删除：一段看不出真假的演示，只要被追问一次「这是真跑的吗」，全部可信度就没了。
 
-9. **结论能走出系统。** 风险卡上有一个「推送到飞书」，服务端 `/api/notify` 把它拼成飞书交互式卡片发到群机器人 webhook（走自定义机器人而不是自建应用 OAuth：后者要建应用、配权限、等审核，没有一步是在演示里可复现的）。做这件事的产品理由是：B 端负责人一天不会主动打开三次控制台，**Agent 发现的问题必须去找人，而不是等人来找它**。两个细节值得说：卡片正文一律 `plain_text` 不用 `lark_md`，因为 detail 里带着单号和金额，出现 `*` 或 `[` 会被飞书当格式吃掉；飞书对失败的推送照样回 HTTP 200，真正的结果在 body 的 `code` 里，只看 `upstream.ok` 会把签名错误当成推送成功——**静默成功比报错危险得多**，未配置 webhook 时这里是明确的 400，不是一个假的「已推送」。
+9. **结论能走出系统，也能从系统外面被问出来。** 飞书这条链路做了两层，两层的取舍完全不同。
+
+   *单向*：风险卡上有个「推送到飞书」，`/api/notify` 把它拼成交互式卡片发到群机器人 webhook。做这件事的产品理由是 B 端负责人一天不会主动打开三次控制台，**Agent 发现的问题必须去找人，而不是等人来找它**。两个细节：卡片正文一律 `plain_text` 不用 `lark_md`，因为 detail 里带着单号和金额，出现 `*` 或 `[` 会被飞书当格式吃掉；飞书对失败的推送照样回 HTTP 200，真正的结果在 body 的 `code` 里，只看 `upstream.ok` 会把签名错误当成推送成功——**静默成功比报错危险得多**，未配置 webhook 时这里是明确的 400，不是一个假的「已推送」。
+
+   *双向*：群里 @星轨 直接问，`/api/feishu/events` 收到事件后在 Cloudflare Worker 里跑**同一份执行器**（`loop.ts` 一行没改——它本来就把环境相关的东西全收在 `RunAgentOptions` 里，服务端只是换一组实现注进去），答案作为卡片回到原消息下面。这一层真正难的不是协议，是**把权限、人工确认、溯源这三件事在系统外面重新建立起来**：
+
+   - **权限不由飞书决定。** 飞书只给一个 `open_id`，映射成哪个 OrbitOS 用户由 `FEISHU_USER_MAP` 说了算，映射不到的人问什么都不回答（卡片会把 `open_id` 原样打出来，方便管理员照着配）。不给「默认只读身份」这个台阶：在一个演示 CRM 里放行陌生人，和在真实系统里放行是同一个动作。
+   - **写操作在飞书这一侧永远拿不到批准。** 服务端注入的 `requestConfirm` 恒返回 `false`，而 `loop.ts` 里每个 `isWrite` 工具都必经这一关——所以这是结构上的拦截，不是约定。被拦之后 Agent 会继续推理并给出建议，用户在飞书里拿得到「该做什么」，拿不到「已经做了」；卡片上给的是一个带 `?role=&ask=` 的回跳链接，人点回网页、在能看见完整上下文和审计留痕的地方按确认。
+   - **一次工具都没调的结论直接拦下。** 浏览器里有守卫 A 兜这件事，飞书这侧照样要兜——**发到群里的消息比屏幕上的更难撤回**。
+
+   还有两个必须讲清的工程约束：飞书要求 **3 秒内返回 200**，否则判定失败并最多重推 3 次（表现是同一个问题被回答三遍），而一次问询要跑 6~40 秒，所以这里收到就 ACK、执行丢进 `waitUntil`；事件去重用的是实例内存，**换隔离实例就失效**，它挡的是同实例上几秒内的重推，不是严格幂等——真要做得上 KV/D1，那是这个演示项目里不成比例的复杂度。这两条都写在代码注释里，是边界不是遗漏。
 
 10. **不支持窄屏是一个决定，不是一个缺口。** 窗口宽度低于 1024px 时不渲染降级布局，而是换成一张把取舍讲清楚的说明卡（并实时显示当前窗口宽度，另给一个「仍要继续」的放行开关，不把人锁在外面）。理由写在卡上：OrbitOS 的核心动作是「一边读结论、一边点结论里的编号跳回数据区核对」，这要求三栏同屏；折成单栏之后结论和它引用的那条记录永远不可能同时出现在屏幕上，这个动作就没了。与其交一个能打开、点两下发现用不了的移动版，不如说清楚它是给谁用的。
 
@@ -105,7 +115,7 @@
 
 **数据**：全部由 `generateSeed(42)` 运行时确定性生成（mulberry32 伪随机），无数据库、无后端存储。48 客户 / 90 商机 / 60 SKU / 160 销售订单 / 55 采购单 / 120 应收。演示所需的冲突链在随机生成之后由 `applyPlantedScenario()` 硬编码覆盖，由 `seed.test.ts` 的断言钉死。
 
-**测试**：16 个测试文件 236 条用例（`present` 38 / `conversations` 28 / `rbac` 27 / `registry` 19 / `loop` 18 / `Markdown` 14 / `tableFilter` 14 / `notify` 13 / `llm` 11 / `prompts` 11 / `seed` 10 / `uiPrefs` 10 / `summarize` 9 / `risk` 7 / `NarrowScreenGate` 4 / `sidekick` 3），覆盖埋雷数据一致性、权限双层拦截、字段脱敏、交期风险计算、Agent 执行循环、三道反编造守卫、多轮上下文折叠、失败分类、结论区排版与溯源标记的共存，以及「模型可见的标识符必须界面上可核对」这条口径不变量。
+**测试**：20 个测试文件 340 条用例（`feishu` 72 / `present` 38 / `conversations` 28 / `rbac` 27 / `registry` 19 / `loop` 18 / `feishu/events` 16 / `Markdown` 14 / `tableFilter` 14 / `notify` 13 / `agentRun` 12 / `llm` 11 / `prompts` 11 / `seed` 10 / `uiPrefs` 10 / `summarize` 9 / `risk` 7 / `bus` 4 / `NarrowScreenGate` 4 / `sidekick` 3），覆盖埋雷数据一致性、权限双层拦截、字段脱敏、交期风险计算、Agent 执行循环、三道反编造守卫、多轮上下文折叠、失败分类、结论区排版与溯源标记的共存，「模型可见的标识符必须界面上可核对」这条口径不变量，以及飞书回调的加解密对拍、验签、事件去重与写操作拦截。
 
 单元测试之外还有一份**打真实模型的端到端回归**：12 条预置问题 + 2 条边界问题各跑一遍完整链路（规划 → function calling → 工具执行 → 结论），逐条核对结论里每一个 `[[编号]]` 能不能在数据库里查到。它不进 `npm test`（要外网、要几分钟、结果不确定），是改提示词或改 Agent 循环后手动跑的验收关卡。
 
@@ -157,7 +167,19 @@ E2E_ONLY=sc-1,ceo-2 E2E_OUT=/tmp/e2e.md npx vitest run --config vitest.e2e.confi
 2. 构建配置：构建命令 `npm run build`，输出目录 `dist`。
 3. 在 Pages 项目的 **Settings → Environment variables** 里加 `DASHSCOPE_API_KEY`，值为阿里云百炼的 API Key。
 4. `functions/api/chat.ts` 会被自动映射为 `/api/chat`，它读取该环境变量并把请求原样转发给 `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`。
-5. 想启用飞书推送，再加两个环境变量：`FEISHU_WEBHOOK_URL`（群设置 → 群机器人 → 添加自定义机器人后拿到的地址）和可选的 `FEISHU_WEBHOOK_SECRET`（机器人开启「签名校验」时才需要，`/api/notify` 会按 `timestamp + "\n" + secret` 作 HMAC-SHA256 密钥算签名）。**不配也不影响其余功能**：`/api/notify` 会返回 400 `NO_WEBHOOK` 并在界面上直说「推送功能在当前部署上未启用」，不会假装发成功。
+5. 想启用**飞书推送**（单向），加两个环境变量：`FEISHU_WEBHOOK_URL`（群设置 → 群机器人 → 添加自定义机器人后拿到的地址）和可选的 `FEISHU_WEBHOOK_SECRET`（机器人开启「签名校验」时才需要，`/api/notify` 会按 `timestamp + "\n" + secret` 作 HMAC-SHA256 密钥算签名）。**不配也不影响其余功能**：`/api/notify` 会返回 400 `NO_WEBHOOK` 并在界面上直说「推送功能在当前部署上未启用」，不会假装发成功。
+
+6. 想启用**群里 @星轨 直接问**（双向），需要一个企业自建应用（要企业管理员权限）：
+
+   1. [开放平台](https://open.feishu.cn/app) → 创建企业自建应用 → 「添加应用能力」里加**机器人**。
+   2. 「权限管理」申请：`im:message`、`im:message.group_at_msg`（群里 @ 才收得到）、`im:message:send_as_bot`。
+   3. 「事件订阅」→ 请求地址填 `https://<你的域名>/api/feishu/events`，订阅 `im.message.receive_v1`。**建议同时设置 Encrypt Key**：配了才有请求验签，不配就只能比对 Verification Token。
+   4. 「版本管理与发布」创建版本并提交，**等管理员审核通过**——这一步不做，机器人加不进群。
+   5. 在 Pages 环境变量里加：`FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_ENCRYPT_KEY`、`FEISHU_VERIFICATION_TOKEN`、`FEISHU_USER_MAP`（形如 `{"ou_xxx":"U-006"}`，把每个人的 `open_id` 映射到 OrbitOS 用户 id）。
+   6. **重新部署一次**。Cloudflare 的环境变量只对新部署生效，改完不重新部署等于没改——这一步最容易被跳过。
+   7. 把机器人拉进群，@它问一句。第一次问的人如果还没在 `FEISHU_USER_MAP` 里，机器人会回一张卡片，上面就写着他的 `open_id`，照着补进去即可。
+
+   本地调这条链路：`.dev.vars` 里配好上面这些（`.env.local` 对 Pages Function 无效），`npm run build && npx wrangler pages dev dist`，再用任意公网隧道把本地端口暴露出去，把隧道地址填进事件订阅的请求地址。
 
 **API Key 不进前端产物。** 浏览器只请求同源的 `/api/chat`，Key 只存在于 Cloudflare 的环境变量里。未配置 Key 时该 Function 返回 503 `NO_KEY`，前端捕获后走预置演示兜底而不是白屏。
 
@@ -170,7 +192,7 @@ E2E_ONLY=sc-1,ceo-2 E2E_OUT=/tmp/e2e.md npx vitest run --config vitest.e2e.confi
 | 文档 | 内容 |
 |---|---|
 | [`docs/PRD.md`](docs/PRD.md) | 问题定义、目标用户与场景、功能范围与非目标、核心流程、权限模型、成功指标、迭代规划 |
-| [`docs/agent-design.md`](docs/agent-design.md) | **Agent 架构设计说明**：为什么选 Planner–Executor、工具边界怎么切、权限为什么放在工具层、幻觉防护五道防线、HITL 的产品设计、成本与延迟、上线后怎么评测 |
+| [`docs/agent-design.md`](docs/agent-design.md) | **Agent 架构设计说明**：为什么选 Planner–Executor、工具边界怎么切、权限为什么放在工具层、幻觉防护五道防线、HITL 的产品设计、成本与延迟、上线后怎么评测、把 Agent 搬到系统外面（飞书） |
 | [`docs/demo-script.md`](docs/demo-script.md) | 现场演示逐句台词、操作步骤、屏幕预期与卡壳预案，附 10 个高频追问的回答要点 |
 | [`docs/img/README.md`](docs/img/README.md) | 截图拍摄清单 |
 | [`docs/superpowers/specs/2026-09-02-orbitos-design.md`](docs/superpowers/specs/2026-09-02-orbitos-design.md) | 施工前的原始设计文档（历史存档，部分内容已被实现修正，以代码为准） |

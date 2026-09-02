@@ -115,3 +115,56 @@
   Markdown.tsx 导出的两个纯函数——为可测性刻意保留，与项目既有做法一致）
 - 未做：端到端回归本期没重跑（只改渲染层与新增旁路功能，未动 prompts.ts / loop.ts）。
   下次改提示词或 agent/loop.ts 时按 README 的命令补跑
+
+## P9 完成 (2026-09-02) —— 飞书双向：群里 @星轨 直接对话
+
+起因：P8 交付的是「飞书 webhook 推送」，但那只是单向告警。真正想要的是**在飞书里直接和 Agent 互动**。
+最终做法是 B+C 结合：**只读在飞书里闭环，写操作跳回网页确认**。
+
+### 新增
+
+- `functions/lib/feishu.ts` + 测试（72 条）——协议层：回调解密（AES-256-CBC，Web Crypto）、验签、
+  `tenant_access_token` 缓存、发消息、卡片构造、`open_id` 映射。加解密和验签都有**对拍基准**：
+  用 `node:crypto` 离线算出常量贴进测试，产品代码里零 `node:crypto`、零 `Buffer`（Workers 没有）。
+  钉死的点包括「恰好 16 字节明文」（PKCS#7 整块填充）和「把 key 与 body 顺序写反」——后者同样
+  产出合法 hex，只有对拍能发现。
+- `functions/lib/agentRun.ts` + 测试（12 条）——在 Worker 里跑同一份执行器。
+- `functions/api/feishu/events.ts` + 测试（16 条）——事件回调路由。
+- `src/components/DeepLink.tsx`——处理 `?role=&ask=` 回跳。
+- `src/lib/bus.test.ts`（4 条）。
+
+### 改动
+
+- `src/agent/llm.ts`：`fetch('/api/chat')` 改成可注入的 `chatEndpoint` + `setChatEndpoint()`。
+  **这是服务端复用执行器的唯一硬阻塞点**——Worker 的 fetch 没有页面基准，相对路径直接抛 Invalid URL。
+- `functions/tsconfig.json`：include 里逐个列出 `loop.ts` 的 14 个传递闭包文件 + `seed.ts`。
+  不能写 `../src/lib/**`——`uiPrefs.ts` 用 localStorage、`store.ts` 依赖 zustand，在 `lib:["ES2021"]`
+  无 DOM 的配置下直接编译失败。**这份清单是护栏**：它变长 = 有浏览器依赖漏进执行器。
+- `src/lib/bus.ts`：加了 pending 暂存槽。
+
+### 踩的坑
+
+1. **把 `src/agent` 纳入 functions 项目后暴露了一个真实类型缺口**：DOM 里 `Response.json()` 返回
+   `any`，Workers 类型定义里返回 `{}`，所以 `j?.choices` 在浏览器侧编得过、在 Worker 侧编译失败。
+   已在 `llm.ts` 显式标注返回体类型。这类差异只有真的把代码放进另一个运行时才会暴露。
+
+2. **`vi.mock` + `vi.hoisted` 打桩 `loop.ts` 一直拿到零参数调用**，且逐字节相同的文件换个名字复现、
+   加一行 `probe.push` 就不复现——排查了很久没定位到根因（不是缓存，`rm -rf node_modules/.vite` 后仍然复现）。
+   **换成注入**：`ServerRunOptions.runner?`，默认 `runAgent`。这本来就更符合这个仓库的风格
+   （`buildFeishuCard` 的 `pushedAt`、`getTenantAccessToken` 的 `now` 都是这么做的），测试面反而更小。
+   教训是：在一个到处都用注入的代码库里遇到 mock 打不通，先想想是不是不该 mock。
+
+3. **子组件 effect 早于父组件**：`DeepLink` 是 `SidekickProvider` 的子组件，它调 `askAgent` 时
+   订阅还没注册，问题被静默丢弃——表现是从飞书点进来只看到一个空 Sidekick，且完全不报错。
+   在总线里加暂存槽解决，比让每个调用方去猜时序可靠。
+
+### 已知边界（都写进了代码注释和 `docs/agent-design.md` §8）
+
+- 3 秒 ACK vs 6~40 秒的问询：收到即 ACK + `waitUntil`，但后台任务时限不由我们控制。
+- 事件去重只在隔离实例内有效，不是严格幂等。
+- 服务端的 db 是另一份 `generateSeed(42)` 快照，和浏览器会话是两个世界；审计日志丢弃。
+  **只读前提下这两件事才成立**——允许飞书落库的第一件要解决的不是权限，是状态从哪来。
+
+### 验收
+
+`npm run build` 0 错误；`npm test` **20 文件 340 用例全绿**（基线 16/236）；`npm run lint` 仍 11 条 warning，无新增。

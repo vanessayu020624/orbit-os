@@ -5,5 +5,15 @@
 #   npm run build && npx wrangler pages dev dist
 #
 DASHSCOPE_API_KEY=
+
+# --- 单向推送：风险卡上的「推送到飞书」按钮（自定义群机器人）---
 FEISHU_WEBHOOK_URL=
 FEISHU_WEBHOOK_SECRET=
+
+# --- 双向对话：在群里 @星轨 直接提问（自建应用）---
+# 本地调这条链路还需要一条公网隧道把回调地址暴露出去，见 README。
+FEISHU_APP_ID=
+FEISHU_APP_SECRET=
+FEISHU_ENCRYPT_KEY=
+FEISHU_VERIFICATION_TOKEN=
+FEISHU_USER_MAP={"ou_xxxxxxxx":"U-006"}

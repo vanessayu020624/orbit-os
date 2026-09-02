@@ -10,5 +10,31 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["**/*.ts"]
+  "//": [
+    "下面这串 ../src/** 是飞书事件回调要用的：同一个执行器要在 Worker 里再跑一遍，",
+    "而 composite 项目必须显式列出每一个被引用的文件，否则 tsc 报 TS6307。",
+    "刻意逐个文件列而不是写 ../src/lib/**：lib 下的 uiPrefs.ts 用了 localStorage、",
+    "store.ts 依赖 zustand，在这套 lib:[ES2021]、无 DOM 的配置下会直接编译失败。",
+    "这份清单就是 loop.ts 的传递闭包（14 个文件）加一个 seed.ts —— 服务端没有浏览器里的",
+    "那份 Zustand db，只能自己 generateSeed(42) 造一份只读快照。清单变长即意味着",
+    "有新的浏览器依赖漏进了执行器，那是要修的信号，不是要往这里补一行。"
+  ],
+  "include": [
+    "**/*.ts",
+    "../src/agent/llm.ts",
+    "../src/agent/loop.ts",
+    "../src/agent/present.ts",
+    "../src/agent/prompts.ts",
+    "../src/agent/registry.ts",
+    "../src/agent/tools/analytics.ts",
+    "../src/agent/tools/crm.ts",
+    "../src/agent/tools/erp.ts",
+    "../src/agent/tools/write.ts",
+    "../src/lib/format.ts",
+    "../src/lib/rbac.ts",
+    "../src/lib/refLookup.ts",
+    "../src/lib/risk.ts",
+    "../src/lib/seed.ts",
+    "../src/lib/types.ts"
+  ]
 }
