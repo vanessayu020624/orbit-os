@@ -21,6 +21,7 @@
   ],
   "include": [
     "**/*.ts",
+    "../src/agent/clarify.ts",
     "../src/agent/llm.ts",
     "../src/agent/loop.ts",
     "../src/agent/present.ts",

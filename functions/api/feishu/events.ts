@@ -177,7 +177,10 @@ async function handle(env: Env, origin: string, msg: IncomingMessage) {
     answer: r.answer,
     roleLabel,
     webUrl,
-    footnote: `调用了 ${r.toolCalls} 次工具${r.refs.length ? ` · 引用 ${r.refs.length} 条记录` : ''}`,
+    footnote: `调用了 ${r.toolCalls} 次工具${r.refs.length ? ` · 引用 ${r.refs.length} 条记录` : ''}`
+      // 飞书这条链路没有「等用户点一下」这个动作，澄清闸只能按兜底口径往下走。
+      // 那就必须写出来：群里的人看到的是一个语气笃定的数字，他有权知道口径是系统定的。
+      + (r.assumption ? `\n口径由系统按默认值确定：${r.assumption}（要换口径请重新提问并写明）` : ''),
   }))
 
   if (r.blockedWrite) {

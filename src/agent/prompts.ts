@@ -34,7 +34,14 @@ ${body}
   return out
 }
 
-export function plannerPrompt(user: User, history?: Turn[], summary?: string): string {
+/**
+ * @param alreadyClarified 本轮已经问过一次澄清了。为真时下面会明确禁止再输出 clarify——
+ *   「最多一轮」这条约束在 loop.ts 里有硬性兜底，但同时也告诉模型一声，
+ *   免得它把整段 JSON 都花在一个注定被忽略的字段上。
+ */
+export function plannerPrompt(
+  user: User, history?: Turn[], summary?: string, alreadyClarified = false,
+): string {
   const m = ROLE_META[user.role]
   return `你是「擎源工业设备」企业运营智能助手 OrbitOS 的规划器。
 
@@ -67,6 +74,22 @@ ${restrictedCatalogText(user.role)}
       **与他意图最接近**的能力，用业务语言说清每个能查到什么，最后给出 1~2 个可以直接照抄的追问示例。
    reply 会原样展示给用户，所以必须自然、具体、可执行。严禁出现「工具」「函数」「接口」
    「场景」「录播」这类实现词汇，也不要说「我无法」就收尾——收尾必须落在「我能为你做什么」上。
+2b.【歧义就问，但只问真歧义】判据只有一条：**不同的理解会不会查到完全不同的一批数据**。
+   会 → 输出空 steps，填 clarify，不要猜。典型是同一个词指向多条记录、
+   统计口径有多种常用定义、时间范围没有锚点。
+   不会 → 正常出步骤。「说得不够精确」不是歧义：用户说「看看订单情况」，
+   不管怎么理解都是查同一批订单，这时候反问只是把活推回给他，比自己合理默认更烦人。
+   clarify 有四个字段，缺一不可：
+     reason  一句话说明为什么问（让用户知道这不是随口反问）
+     ask     问他的那一句，短、具体、可直接回答
+     options 2~3 个**可以直接点**的具体口径，每个都要是能真的查出结果的那种说法。
+             严禁写「其他」「都可以」「请补充说明」这类占位选项。
+     assume  用户不选时你会采用的口径，必须是 options 里最合理的那一个。
+             这个字段是强制的：它保证用户不回答时系统仍然能给出答案，
+             而不是把对话卡在一个问句上。
+${alreadyClarified
+  ? '   【本轮已经澄清过一次，禁止再输出 clarify】必须直接出步骤。仍有不确定的地方，\n     就按最常用的口径处理——问题里括号内的「口径已确认」就是本轮定下的口径。'
+  : ''}
 3. 任何会写入数据的步骤，把 needsWrite 置为 true。
 4. 步骤要具体，不要写「分析数据」这种空话。
 5. 【goal 始终是标题】goal 永远只写一句话概括这次要达成什么，会显示为计划卡标题，不能为空。
@@ -74,17 +97,33 @@ ${restrictedCatalogText(user.role)}
 6. 如果用户是在追问上文（例如「采用方案1」「再查一下那个客户」），结合上文把它还原成具体步骤，不要输出空 steps 要求用户澄清。只有当上文里也确实找不到指代对象时，才输出空 steps。
 
 只输出 JSON，不要任何解释、不要 markdown 代码块：
-{"goal":"一句话目标","steps":[{"id":"s1","title":"具体步骤","expectedTools":["tool_name"]}],"needsWrite":false,"reply":""}`
+{"goal":"一句话目标","steps":[{"id":"s1","title":"具体步骤","expectedTools":["tool_name"]}],"needsWrite":false,"reply":""}
+
+需要澄清时（steps 留空数组、reply 留空字符串）：
+{"goal":"一句话目标","steps":[],"needsWrite":false,"reply":"","clarify":{"reason":"为什么问","ask":"问他的那一句","options":["口径A","口径B"],"assume":"口径A"}}`
 }
 
-export function executorPrompt(user: User, plan: Plan, history?: Turn[], summary?: string): string {
+/**
+ * @param assumption 澄清闸问过、但用户没有选，系统替他定的口径。非 null 时执行器必须把它
+ *   写进结论。这条不能省：一个按未确认口径算出来的数字，只有在用户知道口径的前提下才有意义。
+ */
+export function executorPrompt(
+  user: User, plan: Plan, history?: Turn[], summary?: string, assumption?: string | null,
+): string {
   const m = ROLE_META[user.role]
+  const assumptionBlock = assumption
+    ? `
+【本次有一个未经用户确认的口径】你的问题里有一处含糊，用户没有明确选择，系统按「${assumption}」处理。
+在结论第一句之后，用一句话把这个口径讲出来（例如「以下按${assumption}统计」），
+让用户能立刻判断是不是他要的。不要为此道歉，不要解释系统怎么判定的，一句话带过就行。
+`
+    : ''
   return `你是「擎源工业设备」企业运营智能助手 OrbitOS。
 
 当前用户：${user.name}（${m.label}）
 权限说明：${m.description}
 当前日期：${TODAY}
-${historyBlock(history, summary)}
+${historyBlock(history, summary)}${assumptionBlock}
 本次执行计划：
 ${plan.steps.map((s, i) => `${i + 1}. ${s.title}`).join('\n')}
 

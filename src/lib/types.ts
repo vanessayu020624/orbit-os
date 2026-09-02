@@ -76,9 +76,45 @@ export interface PlanStep { id: string; title: string; expectedTools: string[] }
  * 曾经共用 goal 一个字段，结果是「让它当标题」和「让它当引导语」两条指令互相打架，
  * 实测强化任一条都会压掉另一条。拆字段是唯一稳定的解法。
  */
-export interface Plan { goal: string; steps: PlanStep[]; needsWrite: boolean; reply?: string }
+export interface Plan {
+  goal: string; steps: PlanStep[]; needsWrite: boolean; reply?: string
+  /**
+   * 规划器判定「这句话有歧义，不同理解会查到完全不同的数据」时填这里，steps 留空。
+   * 与 reply（做不了）是两件事：reply 是能力/权限边界，clarify 是**能做，但不知道要哪个**。
+   * 早期版本把两者塞进同一个 reply 字段，结果模型分不清该道歉还是该反问，两种话术互相污染。
+   */
+  clarify?: PlanClarify
+}
+
+/** 规划器给出的澄清请求。options 是给用户点的具体选项，assume 是用户不选时的兜底口径。 */
+export interface PlanClarify { reason: string; ask: string; options: string[]; assume: string }
+
+/** 澄清选项。label 是按钮上的字，refine 是选中后追加进问题的措辞（可以更啰嗦、更精确）。 */
+export interface ClarifyOption { label: string; refine: string }
+
+/**
+ * 一次澄清请求。
+ *
+ * fallback 是这个设计的关键，不是可选的补充字段：它保证「用户不回答」永远有出路。
+ * 没有它，澄清闸就退化成一个能把对话卡死的模态框——而一个能被卡死的 Agent，
+ * 比一个偶尔猜错的 Agent 难用得多。所以规则也好、模型也好，提不出兜底口径就不许发起澄清。
+ */
+export interface ClarifyRequest {
+  /** 为什么要问。展示给用户，让他知道这不是随口反问。 */
+  reason: string
+  /** 问用户的那一句。 */
+  ask: string
+  /** 可直接点击的选项，可能为空（例如悬空指代，系统枚举不出候选）。 */
+  options: ClarifyOption[]
+  /** 用户不选时采用的口径，会被明示在最终结论里。 */
+  fallback: string
+  /** rule = 确定性预检命中（零模型开销）；planner = 规划器的语义判定。 */
+  source: 'rule' | 'planner'
+}
 
 export type AgentEvent =
+  | { type: 'clarify_request'; id: string; req: ClarifyRequest }
+  | { type: 'clarify_resolved'; id: string; choice: string | null }
   | { type: 'plan'; plan: Plan }
   | { type: 'plan_amended'; addedSteps: PlanStep[]; reason: string }
   | { type: 'step_start'; stepId: string }

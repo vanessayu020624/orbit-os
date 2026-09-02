@@ -39,6 +39,14 @@ export interface ServerRunResult {
    * 拿到的数字本来就不一样，不标身份的话群里两个人对着不同的答案吵，还以为是系统在乱报。
    */
   actor: { name: string; role: Role; roleLabel: string } | null
+  /**
+   * 澄清闸问了、但没人能回答（服务端天然没有「等用户点一下」这个动作），系统替他定的口径。
+   *
+   * 这个字段必须一路透到卡片上。执行器已经被要求在正文里讲一句，但正文是模型写的、
+   * 讲不讲得看它心情；卡片脚注是我们自己拼的，一定在。群里读到这条消息的人，
+   * 有权知道这个数字是按哪个口径算的、以及这个口径不是他选的。
+   */
+  assumption: string | null
 }
 
 export interface ServerRunOptions {
@@ -72,6 +80,7 @@ export async function runAgentServerSide(o: ServerRunOptions): Promise<ServerRun
   const user = resolveUser(db.users, o.orbitUserId)
   if (!user) {
     return { ok: false, answer: '', refs: [], toolCalls: 0, blockedWrite: null, actor: null,
+      assumption: null,
       error: `找不到用户 ${o.orbitUserId}，请检查 FEISHU_USER_MAP 里配的 OrbitOS 用户 id` }
   }
 
@@ -80,12 +89,18 @@ export async function runAgentServerSide(o: ServerRunOptions): Promise<ServerRun
   let toolCalls = 0
   let blockedWrite: ServerRunResult['blockedWrite'] = null
   let emittedError: string | null = null
+  let assumption: string | null = null
+  let pendingFallback: string | null = null
   const actor = { name: user.name, role: user.role, roleLabel: ROLE_META[user.role].label }
 
   const emit = (e: AgentEvent) => {
     if (e.type === 'final') { answer = e.text; refs = e.refs }
     else if (e.type === 'tool_result') toolCalls++
     else if (e.type === 'error') emittedError = e.message
+    // 兜底口径在 request 事件里，是否采用了它要看 resolved 事件。分两步接是因为
+    // 这一层不该复制 loop.ts 的判定逻辑——它已经算好了，这里只负责把结果记下来。
+    else if (e.type === 'clarify_request') pendingFallback = e.req.fallback
+    else if (e.type === 'clarify_resolved') assumption = e.choice ?? pendingFallback
   }
 
   try {
@@ -115,19 +130,19 @@ export async function runAgentServerSide(o: ServerRunOptions): Promise<ServerRun
       },
     })
   } catch (e) {
-    return { ok: false, answer, refs, toolCalls, blockedWrite, actor,
+    return { ok: false, answer, refs, toolCalls, blockedWrite, actor, assumption,
       error: emittedError ?? String(e) }
   }
 
   // 有正文但一次工具都没调，说明结论是模型凭空写的。浏览器里有守卫 A 兜这件事，
   // 飞书这条链路照样要兜——发出去的消息比屏幕上的更难撤回。
   if (!answer) {
-    return { ok: false, answer: '', refs, toolCalls, blockedWrite, actor,
+    return { ok: false, answer: '', refs, toolCalls, blockedWrite, actor, assumption,
       error: emittedError ?? '执行器没有产出结论' }
   }
   if (toolCalls === 0) {
-    return { ok: false, answer, refs, toolCalls, blockedWrite, actor,
+    return { ok: false, answer, refs, toolCalls, blockedWrite, actor, assumption,
       error: '执行器没有调用任何工具，这条结论无法溯源，已拦截' }
   }
-  return { ok: true, answer, refs, toolCalls, blockedWrite, actor, error: null }
+  return { ok: true, answer, refs, toolCalls, blockedWrite, actor, assumption, error: null }
 }

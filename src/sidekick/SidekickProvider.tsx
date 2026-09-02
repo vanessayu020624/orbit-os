@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
-import type { AgentEvent, Plan, Role } from '../lib/types'
+import type { AgentEvent, ClarifyRequest, Plan, Role } from '../lib/types'
 import { useStore } from '../lib/store'
 import { runAgent } from '../agent/loop'
 import { describeLlmError, resetUsage, sumUsage } from '../agent/llm'
@@ -67,6 +67,10 @@ export type Item =
   | { k: 'plan'; plan: Plan }
   | { k: 'tool'; id: string; name: string; args: unknown; result?: unknown; ms?: number }
   | { k: 'confirm'; id: string; toolName: string; summary: string; resolved?: boolean }
+  // 澄清卡。chosen 有三态：undefined = 还在等用户点；string = 他选了这个口径；
+  // null = 他按了「就按默认口径继续」（或压根没理它）。三态必须分开，
+  // 因为「他选的」和「系统替他定的」在结论可信度上完全是两回事，卡片上要写清楚是哪一种。
+  | { k: 'clarify'; id: string; req: ClarifyRequest; chosen?: string | null }
   | { k: 'final'; text: string; refs: string[] }
   | { k: 'error'; text: string }
   | { k: 'divider'; text: string }
@@ -84,6 +88,8 @@ export interface SidekickCtx {
   setInput: (v: string) => void
   ask: (q: string) => Promise<void>
   decide: (id: string, ok: boolean) => void
+  /** 澄清闸的应答。choice 传 null 表示「不选，按兜底口径继续」。 */
+  clarify: (id: string, choice: string | null) => void
   open: boolean            // 抽屉是否展开
   setOpen: (v: boolean) => void
   wide: boolean            // 宽档位：false=380px，true=560px
@@ -139,6 +145,10 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
   const [busyConvId, setBusyConvId] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const pending = useRef<Map<string, (ok: boolean) => void>>(new Map())
+  // 与 pending 分开而不是共用一张表：确认卡的答复是 boolean、澄清卡的是 string | null，
+  // 挤进同一个 Map 只能靠 any 才编得过，而这两条链路串了就是把「批准写操作」和
+  // 「选了个口径」混为一谈——这是这个项目里最不该出错的地方。
+  const pendingClarify = useRef<Map<string, (choice: string | null) => void>>(new Map())
   // busy 状态用于渲染禁用输入框；busyRef 供 ask() 内部做实时并发拦截，
   // 避免 bus 订阅注册的旧闭包读到渲染时快照的 busy（见下方 useEffect 的说明）。
   const busyRef = useRef(false)
@@ -187,6 +197,11 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
           ? { ...it, result: e.result, ms: e.ms } : it)); break
       case 'confirm_request':
         updateItems(convId, p => [...p, { k: 'confirm', id: e.id, toolName: e.toolName, summary: e.summary }]); break
+      case 'clarify_request':
+        updateItems(convId, p => [...p, { k: 'clarify', id: e.id, req: e.req }]); break
+      case 'clarify_resolved':
+        updateItems(convId, p => p.map(it => it.k === 'clarify' && it.id === e.id
+          ? { ...it, chosen: e.choice } : it)); break
       case 'confirm_resolved':
         updateItems(convId, p => p.map(it => it.k === 'confirm' && it.id === e.id
           ? { ...it, resolved: e.approved } : it)); break
@@ -199,6 +214,9 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
 
   const requestConfirm = (id: string) =>
     new Promise<boolean>(res => { pending.current.set(id, res) })
+
+  const requestClarify = (id: string) =>
+    new Promise<string | null>(res => { pendingClarify.current.set(id, res) })
 
   // 切角色时的兜底：activeId 可能还指向上一个角色的会话（bus 路径尤其容易撞上——
   // 风险卡的按钮可能是在角色切换的瞬间被点的），这时任何提问都必须落到当前角色自己的会话上，
@@ -252,6 +270,7 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
         getDb: () => useStore.getState().db,
         mutate: applyMutation, emit, pushAudit,
         requestConfirm: (id) => confirmFn(id),
+        requestClarify: (id) => requestClarify(id),
         history: targetConv.history,
         summary: targetConv.summary,
       })
@@ -332,6 +351,11 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
     pending.current.delete(id)
   }
 
+  function clarify(id: string, choice: string | null) {
+    pendingClarify.current.get(id)?.(choice)
+    pendingClarify.current.delete(id)
+  }
+
   // 四个会话管理操作统一用 busyRef（而非渲染态 busy）做并发拦截：理由和 ask() 一样——
   // 它们可能被非渲染路径（bus、事件回调）调用，读渲染快照的 busy 可能过期。
   // 一次问询跑到一半切走/删除/重置活跃会话，会让 updateItems 写不到目标会话，答案凭空消失；
@@ -388,7 +412,7 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
   }
 
   const value: SidekickCtx = {
-    items, steps, amended, busy, input, setInput, ask, decide,
+    items, steps, amended, busy, input, setInput, ask, decide, clarify,
     open, setOpen, wide, setWide,
     conversations, activeId, activeConversation, busyConvId,
     newChat, switchChat, deleteChat, archiveChat, unarchiveChat, resetConversations,
