@@ -132,7 +132,7 @@
 
 **数据**：全部由 `generateSeed(42)` 运行时确定性生成（mulberry32 伪随机），无数据库、无后端存储。48 客户 / 90 商机 / 60 SKU / 160 销售订单 / 55 采购单 / 120 应收。演示所需的冲突链在随机生成之后由 `applyPlantedScenario()` 硬编码覆盖，由 `seed.test.ts` 的断言钉死。
 
-**测试**：24 个测试文件 392 条用例（`feishu` 72 / `present` 38 / `clarify` 32 / `conversations` 28 / `rbac` 27 / `registry` 19 / `loop` 18 / `feishu/events` 16 / `Markdown` 14 / `tableFilter` 14 / `notify` 13 / `agentRun` 12 / `llm` 11 / `prompts` 11 / `seed` 10 / `uiPrefs` 10 / `recordLookup` 9 / `summarize` 9 / `risk` 7 / `dataCards` 6 / `NarrowScreenGate` 5 / `viewport` 4 / `bus` 4 / `sidekick` 3），覆盖埋雷数据一致性、权限双层拦截、字段脱敏、交期风险计算、Agent 执行循环、三道反编造守卫、歧义澄清闸（含「内置问题一条都不许被误拦」的回归）、多轮上下文折叠、失败分类、结论区排版与溯源标记的共存，「模型可见的标识符必须界面上可核对」这条口径不变量，移动端与桌面端的权限同源，以及飞书回调的加解密对拍、验签、事件去重与写操作拦截。
+**测试**：24 个测试文件 393 条用例（`feishu` 72 / `present` 38 / `clarify` 33 / `conversations` 28 / `rbac` 27 / `registry` 19 / `loop` 18 / `feishu/events` 16 / `Markdown` 14 / `tableFilter` 14 / `notify` 13 / `agentRun` 12 / `llm` 11 / `prompts` 11 / `seed` 10 / `uiPrefs` 10 / `recordLookup` 9 / `summarize` 9 / `risk` 7 / `dataCards` 6 / `NarrowScreenGate` 5 / `viewport` 4 / `bus` 4 / `sidekick` 3），覆盖埋雷数据一致性、权限双层拦截、字段脱敏、交期风险计算、Agent 执行循环、三道反编造守卫、歧义澄清闸（含「内置问题一条都不许被误拦」的回归）、多轮上下文折叠、失败分类、结论区排版与溯源标记的共存，「模型可见的标识符必须界面上可核对」这条口径不变量，移动端与桌面端的权限同源，以及飞书回调的加解密对拍、验签、事件去重与写操作拦截。
 
 单元测试之外还有一份**打真实模型的端到端回归**：12 条预置问题 + 2 条边界问题各跑一遍完整链路（规划 → function calling → 工具执行 → 结论），逐条核对结论里每一个 `[[编号]]` 能不能在数据库里查到。它不进 `npm test`（要外网、要几分钟、结果不确定），是改提示词或改 Agent 循环后手动跑的验收关卡。
 
@@ -157,7 +157,7 @@ npm run build && npx wrangler pages dev dist --binding DASHSCOPE_API_KEY=<your-k
 其他命令：
 
 ```bash
-npm test             # vitest run，应为 24 files / 392 tests 全绿
+npm test             # vitest run，应为 24 files / 393 tests 全绿
 npm run build        # tsc -b && vite build
 npm run lint         # oxlint
 ```

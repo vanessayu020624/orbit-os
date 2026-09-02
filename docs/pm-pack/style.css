@@ -1,0 +1,124 @@
+/* OrbitOS AI 产品交付物全集 —— 打印样式表 */
+
+@page {
+  size: A4;
+  margin: 20mm 17mm 18mm 17mm;
+  @bottom-center { content: counter(page); font-size: 8.5pt; color: #9aa3ad; }
+  @top-right     { content: string(chaptitle); font-size: 8pt; color: #b3bac2; }
+}
+@page :first { @bottom-center { content: none; } @top-right { content: none; } }
+@page cover   { margin: 0; @bottom-center { content: none; } @top-right { content: none; } }
+
+html { font-size: 10pt; }
+body {
+  font-family: "Noto Sans SC", "Droid Sans Fallback", sans-serif;
+  font-size: 9.6pt; line-height: 1.62; color: #1c2530;
+  hyphens: none; word-break: normal;
+}
+
+/* ---------- 封面 ---------- */
+.cover { page: cover; height: 297mm; position: relative; color: #fff;
+  background: linear-gradient(160deg, #0f2744 0%, #17395f 45%, #1d4a7a 100%); }
+.cover-inner { position: absolute; top: 52mm; left: 22mm; right: 22mm; }
+.cover .kicker { font-size: 10pt; letter-spacing: .3em; color: #7fb2e5; margin-bottom: 9mm; }
+.cover h1 { font-size: 30pt; line-height: 1.25; margin: 0 0 5mm; color: #fff; border: 0; padding: 0; }
+.cover .sub { font-size: 12.5pt; color: #b9d4ef; font-weight: 300; line-height: 1.7; margin-bottom: 14mm; }
+.cover .rule { width: 34mm; height: 3px; background: #4f9ada; margin-bottom: 12mm; }
+.cover .meta { font-size: 9.5pt; color: #9ec3e6; line-height: 2.0; }
+.cover .meta b { color: #e4f0fb; font-weight: 500; }
+.cover-foot { position: absolute; bottom: 20mm; left: 22mm; right: 22mm;
+  font-size: 8.5pt; color: #6f9ec9; border-top: 1px solid rgba(255,255,255,.18); padding-top: 5mm; }
+
+/* ---------- 标题 ---------- */
+h1 { font-size: 19pt; color: #0f2744; margin: 0 0 7mm; padding-bottom: 3mm;
+     border-bottom: 2.5px solid #1d4a7a; page-break-before: always; page-break-after: avoid;
+     string-set: chaptitle content(); }
+h1.nobreak { page-break-before: auto; }
+h2 { font-size: 13pt; color: #17395f; margin: 8mm 0 3mm; padding-left: 3mm;
+     border-left: 4px solid #4f9ada; page-break-after: avoid; }
+h3 { font-size: 10.8pt; color: #1d4a7a; margin: 6mm 0 2mm; page-break-after: avoid; }
+h4 { font-size: 9.8pt; color: #33475e; margin: 4mm 0 1.5mm; page-break-after: avoid; }
+p { margin: 0 0 2.6mm; text-align: justify; }
+ul, ol { margin: 0 0 3mm; padding-left: 6mm; }
+li { margin-bottom: 1.4mm; }
+li > ul, li > ol { margin-top: 1.4mm; }
+b, strong { color: #0f2744; font-weight: 600; }
+a { color: #1d4a7a; text-decoration: none; }
+
+/* ---------- 目录 ---------- */
+.toc { margin-top: 4mm; }
+.toc a { display: block; color: #24313f; text-decoration: none; }
+.toc a::after { content: leader('.') target-counter(attr(href), page); color: #a8b2bc; }
+.toc .l1 { font-weight: 600; color: #0f2744; margin-top: 3.4mm; font-size: 10pt; }
+.toc .l2 { margin-left: 6mm; font-size: 9.2pt; color: #46586c; }
+
+/* ---------- 表格 ---------- */
+table { border-collapse: collapse; width: 100%; margin: 3mm 0 4.5mm; font-size: 8.5pt;
+        page-break-inside: auto; }
+tr { page-break-inside: avoid; page-break-after: auto; }
+thead { display: table-header-group; }
+th { background: #17395f; color: #fff; font-weight: 500; text-align: left;
+     padding: 2mm 2.2mm; border: 1px solid #17395f; line-height: 1.45; }
+td { padding: 1.8mm 2.2mm; border: 1px solid #d7dee6; vertical-align: top; line-height: 1.5; }
+tbody tr:nth-child(even) td { background: #f6f9fc; }
+td.num, th.num { text-align: right; white-space: nowrap; }
+td.ctr, th.ctr { text-align: center; }
+table.tight { font-size: 8pt; }
+table.tight td, table.tight th { padding: 1.4mm 1.8mm; }
+
+/* ---------- 代码与引用 ---------- */
+code { font-family: "DejaVu Sans Mono", monospace; font-size: 8.2pt;
+       background: #eef2f7; padding: 0.3mm 1mm; border-radius: 2px; color: #0f2744; }
+pre { font-family: "DejaVu Sans Mono", monospace; font-size: 7.9pt; line-height: 1.5;
+      background: #f6f9fc; border: 1px solid #dbe3ec; border-left: 3px solid #4f9ada;
+      padding: 2.5mm 3mm; margin: 2.5mm 0 4mm; white-space: pre-wrap; overflow-wrap: break-word;
+      page-break-inside: avoid; color: #22303f; }
+pre code { background: none; padding: 0; font-size: 7.9pt; }
+.src { font-family: "DejaVu Sans Mono", monospace; font-size: 7.6pt; color: #6b7885; }
+
+/* ---------- 提示框 ---------- */
+.box { padding: 2.8mm 3.4mm; margin: 3mm 0 4mm; border-radius: 3px; font-size: 9pt;
+       page-break-inside: avoid; }
+.box p:last-child { margin-bottom: 0; }
+.box .bt { font-weight: 600; font-size: 8.8pt; display: block; margin-bottom: 1.6mm;
+           letter-spacing: .04em; }
+.box-key  { background: #eef5fc; border-left: 4px solid #1d6fc0; }
+.box-key .bt { color: #12518f; }
+.box-warn { background: #fdf4e8; border-left: 4px solid #d98324; }
+.box-warn .bt { color: #99590f; }
+.box-gap  { background: #fdeeee; border-left: 4px solid #c0392b; }
+.box-gap .bt { color: #96271b; }
+.box-ok   { background: #eef8f0; border-left: 4px solid #2e8b52; }
+.box-ok .bt { color: #1e6939; }
+.box-neutral { background: #f4f6f8; border-left: 4px solid #8795a3; }
+.box-neutral .bt { color: #4b5866; }
+
+/* ---------- 徽标 ---------- */
+.tag { display: inline-block; font-size: 7.4pt; padding: 0.4mm 1.6mm; border-radius: 2.5px;
+       font-weight: 600; white-space: nowrap; line-height: 1.5; }
+.t-meas { background: #dff0e3; color: #1e6939; }   /* 已实测 */
+.t-est  { background: #fdf0dc; color: #99590f; }   /* 估算 */
+.t-todo { background: #fbe3e0; color: #96271b; }   /* 待实测 */
+.t-code { background: #e3ecf7; color: #12518f; }   /* 代码事实 */
+.t-p0 { background: #c0392b; color: #fff; }
+.t-p1 { background: #d98324; color: #fff; }
+.t-p2 { background: #7b8794; color: #fff; }
+
+/* ---------- 图 ---------- */
+figure { margin: 3mm 0 5mm; page-break-inside: avoid; text-align: center; }
+figure svg { max-width: 100%; height: auto; }
+figcaption { font-size: 8.2pt; color: #6b7885; margin-top: 1.8mm; text-align: center; }
+.ascii { font-family: "DejaVu Sans Mono", monospace; font-size: 7.2pt; line-height: 1.35;
+         background: #fbfcfd; border: 1px solid #dbe3ec; padding: 3mm; white-space: pre;
+         page-break-inside: avoid; color: #22303f; overflow-x: hidden; }
+/* 全角字符占正好 2 个等宽格（DejaVu Sans Mono advance = 0.6021em） */
+.ascii .w { display: inline-block; width: 1.2042em; text-align: center;
+            font-family: "Noto Sans SC", sans-serif; }
+
+/* ---------- 其它 ---------- */
+.lead { font-size: 10pt; color: #33475e; border-left: 3px solid #c3d3e3; padding-left: 4mm;
+        margin: 0 0 6mm; }
+.small { font-size: 8.4pt; color: #6b7885; }
+hr { border: 0; border-top: 1px solid #dbe3ec; margin: 6mm 0; }
+.avoid { page-break-inside: avoid; }
+.newpage { page-break-before: always; }

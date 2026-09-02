@@ -132,7 +132,9 @@ describe('内置问题不许被误拦', () => {
   const users: Record<string, User> = {
     sales_rep: rep, sales_director: pick('U-004'), supply_chain: supply, ceo,
   }
-  const deliberate = new Set(['公司最大的客户是谁？'])
+  // 这两条预置问题是**刻意**留着触发澄清闸的演示素材，不是漏网的误拦：
+  // 「最大的客户」有三种口径排出三份名单，「伺服电机」在库里有 11 个 SKU。
+  const deliberate = new Set(['公司最大的客户是谁？', '伺服电机还有多少库存？'])
 
   for (const [role, qs] of Object.entries(PRESETS_BY_ROLE)) {
     for (const q of qs) {

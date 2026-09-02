@@ -1,0 +1,243 @@
+<h1 id="c3">第 3 章　产品需求文档（PRD）</h1>
+
+<p class="lead">本章是全册的规格主体。所有权限、工具、参数均以代码为准，与仓库内既有 <code>docs/PRD.md</code> 的差异已在第 9 章逐条列明。功能需求带验收标准，缺口登记册如实列出已知不足。</p>
+
+<h2 id="c3-1">3.1　产品定位与设计原则</h2>
+
+<p><b>一句话定位：</b>OrbitOS 是一个打通 CRM 与 ERP 数据的企业运营 Agent —— 它在每个员工自己的权限边界内，把跨系统的交叉核对压缩成一句话，并在结论之后允许直接执行处置动作，但每一次写入都必须由人确认。</p>
+
+<h3>五条设计原则</h3>
+
+<table>
+<thead><tr><th style="width:22%">原则</th><th style="width:32%">含义</th><th>在代码中的体现</th></tr></thead>
+<tbody>
+<tr><td><b>P1　模型只做判断，代码只做规则</b></td><td>凡是能用确定性代码算准的（金额、缺口、日期差、风险等级），一律不交给模型</td><td><code>risk.ts</code> 全部数值计算为纯函数；<code>confirmSummary</code> 现查数据库；模型的输出里不应出现它自己算出来的数</td></tr>
+<tr><td><b>P2　每个数字必须可核对</b></td><td>回答中的实体标识必须是用户能在 UI 里翻到的那一个</td><td><code>present.ts</code> 投影层：只暴露业务单号（SO-2026-0412 / SKU-203），不暴露内部主键（SO-001 / P-003）；<code>[[ref]]</code> 角标可点击定位</td></tr>
+<tr><td><b>P3　写操作必须由人拍板</b></td><td>Agent 可以准备一个动作，但不能替人做决定</td><td>4 个写工具全部 HITL 拦截；确认摘要由代码生成（§2.5）</td></tr>
+<tr><td><b>P4　边界要说出来，不能装作没有</b></td><td>看不到的数据要告知存在，而不是当作不存在</td><td><code>scope.hidden</code> 披露；Executor 规则 4a 明令禁止「全公司只有 N 个」这类表述</td></tr>
+<tr><td><b>P5　AI 挂了系统还得能用</b></td><td>Agent 是增量能力，不是承重墙</td><td>5 个数据页面完全不经过 Agent；失败卡后紧跟「不依赖模型的数据现在就能查」</td></tr>
+</tbody>
+</table>
+
+<h2 id="c3-2">3.2　目标与非目标</h2>
+
+<table>
+<thead><tr><th style="width:50%">本版本要做的</th><th>本版本明确不做的</th></tr></thead>
+<tbody>
+<tr><td>
+<ul>
+<li>四角色权限隔离的对话式查询（读）</li>
+<li>跨 CRM/ERP 的交叉推演（交期风险）</li>
+<li>写操作的 HITL 确认与审计留痕</li>
+<li>数字可溯源（<code>[[ref]]</code> 角标 + 无法解析时标红）</li>
+<li>不依赖模型的 5 个数据页面 + 仪表盘</li>
+<li>会话按角色隔离、可归档</li>
+</ul>
+</td><td>
+<ul>
+<li><b>不做真实 ERP/CRM 对接</b>——数据为固定种子生成，目的是可复现与可回归</li>
+<li><b>不做主动推送</b>——风险需用户提问才触发（缺口 G-03）</li>
+<li><b>不做跨会话长期记忆</b>——单会话内最近 6 轮原文 + 更早轮次折叠成 300 字摘要，会话之外不留存</li>
+<li><b>不做模型微调</b>——全部能力来自 prompt + 工具设计</li>
+<li><b>不做移动端</b></li>
+<li><b>不做多租户</b>——单公司单实例</li>
+</ul>
+</td></tr>
+</tbody>
+</table>
+
+<div class="box box-key">
+  <span class="bt">这个参数被定错过一次，值得单独讲</span>
+  <p>最初的值是<b>最近 2 轮</b>，理由写得很像回事：企业数据问答的典型会话是 1~3 轮，长程记忆收益低；而历史要同时进 Planner 和 Executor 的 system prompt，token 成本近似线性增长，旧数据还会与新结果冲突诱发幻觉。</p>
+  <p>这套推理唯一的问题是：<b>它假设的会话形状不是真实的会话形状。</b>真实的追问链是「查风险 → 看某张订单 → 问这个客户的应收 → 回头说『用方案 1』」——到第四问时第一问已经掉出窗口，模型会把「方案 1」理解成刚才那个客户的事。<b>2 轮够接住紧邻指代，接不住跨话题回指。</b></p>
+  <p>现值是 <code>HISTORY_TURNS = 6</code> 原文 + 更早轮次滚动折叠成 <code>SUMMARY_MAX = 300</code> 字摘要（<code>summarize.ts</code>）。不无限往上加的原因仍然是成本：Executor 的 system prompt 本身就带工具目录，历史每多一轮都要乘进后面每一次 function calling 的往返。</p>
+  <p><b>可迁移的一点：</b>上下文窗口大小不是一个可以拍脑袋定的常数，它取决于「用户的指代最远指向多久之前」。这个距离只能靠观测得到，所以 §6.3 的「会话轮次分布」埋点不是锦上添花——它是这个参数唯一的校准依据。</p>
+</div>
+
+<h2 id="c3-3">3.3　角色与权限矩阵（以代码为准）</h2>
+
+<h3>3.3.1　工具可见性矩阵</h3>
+
+<table class="tight">
+<thead><tr><th style="width:26%">工具</th><th class="ctr" style="width:7%">类型</th><th class="ctr">销售<br>张伟</th><th class="ctr">总监<br>李娜</th><th class="ctr">供应链<br>王强</th><th class="ctr">CEO<br>陈立</th></tr></thead>
+<tbody>
+<tr><td><code>query_customers</code></td><td class="ctr">读</td><td class="ctr">✓</td><td class="ctr">✓</td><td class="ctr">✓</td><td class="ctr">✓</td></tr>
+<tr><td><code>get_customer_detail</code></td><td class="ctr">读</td><td class="ctr">✓</td><td class="ctr">✓</td><td class="ctr">✓</td><td class="ctr">✓</td></tr>
+<tr><td><code>query_opportunities</code></td><td class="ctr">读</td><td class="ctr">✓</td><td class="ctr">✓</td><td class="ctr">—</td><td class="ctr">✓</td></tr>
+<tr><td><code>query_sales_orders</code></td><td class="ctr">读</td><td class="ctr">✓</td><td class="ctr">✓</td><td class="ctr">✓</td><td class="ctr">✓</td></tr>
+<tr><td><code>get_order_detail</code></td><td class="ctr">读</td><td class="ctr">✓</td><td class="ctr">✓</td><td class="ctr">✓</td><td class="ctr">✓</td></tr>
+<tr><td><code>check_inventory</code></td><td class="ctr">读</td><td class="ctr">✓</td><td class="ctr">✓</td><td class="ctr">✓</td><td class="ctr">✓</td></tr>
+<tr><td><code>simulate_delivery_risk</code></td><td class="ctr">读</td><td class="ctr">✓</td><td class="ctr">✓</td><td class="ctr">✓</td><td class="ctr">✓</td></tr>
+<tr><td><code>aggregate_metrics</code></td><td class="ctr">读</td><td class="ctr">✓</td><td class="ctr">✓</td><td class="ctr">✓</td><td class="ctr">✓</td></tr>
+<tr><td><code>query_purchase_orders</code></td><td class="ctr">读</td><td class="ctr">—</td><td class="ctr">—</td><td class="ctr">✓</td><td class="ctr">✓</td></tr>
+<tr><td><code>get_supplier_options</code></td><td class="ctr">读</td><td class="ctr">—</td><td class="ctr">—</td><td class="ctr">✓</td><td class="ctr">✓</td></tr>
+<tr><td><code>query_receivables</code></td><td class="ctr">读</td><td class="ctr">—</td><td class="ctr">✓</td><td class="ctr">—</td><td class="ctr">✓</td></tr>
+<tr><td><code>create_followup_task</code></td><td class="ctr"><b>写</b></td><td class="ctr">✓</td><td class="ctr">✓</td><td class="ctr">—</td><td class="ctr">✓</td></tr>
+<tr><td><code>update_order_promise_date</code></td><td class="ctr"><b>写</b></td><td class="ctr">✓</td><td class="ctr">✓</td><td class="ctr">—</td><td class="ctr">✓</td></tr>
+<tr><td><code>create_purchase_order</code></td><td class="ctr"><b>写</b></td><td class="ctr">—</td><td class="ctr">—</td><td class="ctr">✓</td><td class="ctr">✓</td></tr>
+<tr><td><code>reserve_inventory</code></td><td class="ctr"><b>写</b></td><td class="ctr">—</td><td class="ctr">—</td><td class="ctr">✓</td><td class="ctr">✓</td></tr>
+<tr><td colspan="2"><b>合计可用工具数</b></td><td class="ctr"><b>9</b></td><td class="ctr"><b>11</b></td><td class="ctr"><b>10</b></td><td class="ctr"><b>15</b></td></tr>
+</tbody>
+</table>
+<p class="src">来源：逐个核对 src/agent/tools/*.ts 中各工具的 allowedRoles 数组。此表与 docs/PRD.md 的记载存在 3 处冲突，见 §9.2 审计项 A-01~A-03。</p>
+
+<h3>3.3.2　数据范围矩阵</h3>
+
+<table class="tight">
+<thead><tr><th style="width:16%">数据域</th><th>销售 张伟</th><th>总监 李娜</th><th>供应链 王强</th><th>CEO 陈立</th></tr></thead>
+<tbody>
+<tr><td>客户（48）</td><td>按 ownerId → 9 个</td><td>按团队成员 → 团队名下</td><td><b>全部 48</b></td><td>全部 48</td></tr>
+<tr><td>商机（90）</td><td>按 ownerId</td><td>按团队成员</td><td><b>[] 空</b></td><td>全部 90</td></tr>
+<tr><td>销售订单（160）</td><td>按 ownerId</td><td>按团队成员</td><td><b>全部 160，金额遮蔽</b></td><td>全部 160</td></tr>
+<tr><td>库存（60）</td><td>全部</td><td>全部</td><td>全部</td><td>全部</td></tr>
+<tr><td>采购单（55）</td><td><b>[] 空</b></td><td><b>[] 空</b></td><td>全部</td><td>全部</td></tr>
+<tr><td>应收（120）</td><td><b>[] 空</b></td><td>按团队成员</td><td><b>[] 空</b></td><td>全部</td></tr>
+</tbody>
+</table>
+
+<div class="box box-key">
+  <span class="bt">供应链角色的权限设计是本产品最见功力的一处</span>
+  <p>王强能看到<b>全部 160 张订单</b>但<b>金额被遮蔽</b>，能看到<b>全部 48 个客户</b>但<b>看不到任何商机和应收</b>。这个组合不是随手配的，它精确对应一句业务判断：<b>供应链需要知道「要发什么货给谁、什么时候」，但不需要知道「这单赚多少钱」。</b></p>
+  <p>如果按常见做法「供应链只能看跟他有关的订单」，那 <code>simulate_delivery_risk</code> 就永远算不准——因为库存台账的推演必须覆盖窗口内<b>全部</b>待发货订单，少一张结果就是错的。<b>权限的粒度必须服从业务计算的完整性要求，而不是反过来。</b>这是从第 2 章断点③ 直接推导出来的设计。</p>
+</div>
+
+<h3>3.3.3　显式拒绝对（DENIED_PAIRS）</h3>
+
+<p>代码中显式声明了 5 组「角色 × 数据域」的拒绝关系<span class="tag t-code">代码事实</span>（rbac.ts:123-129）：销售/总监 × 采购单，销售/供应链 × 应收，供应链 × 商机。侧边栏对应导航项显示为灰色 + 挂锁图标，但<b>仍可点击</b>——点进去是一个说明为什么无权的页面，而不是直接消失。</p>
+
+<p class="small">这个选择是刻意的：菜单项直接消失会让用户以为「系统没这个功能」，从而去别处找；显示但锁定则传达「有这个功能，但不是你的职权范围」。前者制造困惑，后者传达组织边界。</p>
+
+<h2 id="c3-4">3.4　功能需求清单 FR-01 ~ FR-24</h2>
+
+<table class="tight">
+<thead><tr><th style="width:7%">编号</th><th style="width:8%">优先级</th><th style="width:24%">需求</th><th style="width:33%">验收标准</th><th>状态</th></tr></thead>
+<tbody>
+<tr><td colspan="5" style="background:#e8eef5"><b>A 组　对话与推理</b></td></tr>
+<tr><td>FR-01</td><td><span class="tag t-p0">P0</span></td><td>自然语言提问，返回基于真实数据的答复</td><td>回答中出现的每个实体标识都能在左侧页面中找到同名记录</td><td>已实现</td></tr>
+<tr><td>FR-02</td><td><span class="tag t-p0">P0</span></td><td>先出计划再执行，计划实时渲染</td><td>提问后 UI 先显示步骤列表，再逐步显示工具调用</td><td>已实现</td></tr>
+<tr><td>FR-03</td><td><span class="tag t-p0">P0</span></td><td>执行中可追加步骤</td><td>模型输出含「需要追加步骤：X」时，UI 出现 plan_amended 提示且步骤列表更新</td><td>已实现</td></tr>
+<tr><td>FR-04</td><td><span class="tag t-p0">P0</span></td><td>单次会话工具调用轮数上限</td><td>MAX_TURNS=12，超出后强制收尾并告知用户</td><td>已实现</td></tr>
+<tr><td>FR-05</td><td><span class="tag t-p1">P1</span></td><td>闲聊/越界问题不触发工具调用</td><td>Planner 返回空 steps + reply，直接收尾，零工具调用</td><td>已实现</td></tr>
+<tr><td>FR-06</td><td><span class="tag t-p1">P1</span></td><td>保留最近 6 轮原文，更早轮次折叠成 300 字摘要</td><td>跨话题回指（「刚才那两张订单」「用方案 1」）能正确解析</td><td>已实现（<code>summarize.ts</code>，滚动折叠，失败静默降级为保留原摘要）</td></tr>
+<tr><td colspan="5" style="background:#e8eef5"><b>B 组　权限与数据范围</b></td></tr>
+<tr><td>FR-07</td><td><span class="tag t-p0">P0</span></td><td>工具按角色可见性过滤</td><td>切换到销售角色后，模型的工具 schema 中不含采购/应收类工具</td><td>已实现</td></tr>
+<tr><td>FR-08</td><td><span class="tag t-p0">P0</span></td><td>执行时二次权限复检</td><td>伪造无权工具调用返回 PERMISSION_DENIED，UI 红点</td><td>已实现</td></tr>
+<tr><td>FR-09</td><td><span class="tag t-p0">P0</span></td><td>查询结果按角色范围过滤</td><td>张伟查客户返回 9 条；CEO 查同一问题返回 48 条</td><td>已实现</td></tr>
+<tr><td>FR-10</td><td><span class="tag t-p0">P0</span></td><td>越界数据必须披露而非隐瞒</td><td>scope.hidden&gt;0 时回答中出现「还有 N 条不在权限范围内」</td><td>已实现</td></tr>
+<tr><td>FR-11</td><td><span class="tag t-p1">P1</span></td><td>无权菜单可见但锁定</td><td>灰色 + 挂锁图标，点击进入权限说明而非 404</td><td>已实现</td></tr>
+<tr><td>FR-12</td><td><span class="tag t-p1">P1</span></td><td>供应链视角订单金额遮蔽</td><td>王强查订单，金额字段显示为遮蔽态</td><td>已实现<span class="tag t-code">但存在双实现</span></td></tr>
+<tr><td colspan="5" style="background:#e8eef5"><b>C 组　写操作与 HITL</b></td></tr>
+<tr><td>FR-13</td><td><span class="tag t-p0">P0</span></td><td>全部写操作执行前拦截</td><td>4 个写工具中任一被调用，均先渲染确认卡并挂起循环</td><td>已实现</td></tr>
+<tr><td>FR-14</td><td><span class="tag t-p0">P0</span></td><td>确认摘要由代码生成，非模型转述</td><td>确认卡上的成本、ETA、供应商名与数据库一致</td><td><b>部分</b>：仅 create_purchase_order 完整实现（G-01）</td></tr>
+<tr><td>FR-15</td><td><span class="tag t-p0">P0</span></td><td>拒绝后不执行、不留审计、不重试</td><td>点拒绝 → 数据库无变更、审计流水无新增、Agent 不再调同一工具</td><td>已实现</td></tr>
+<tr><td>FR-16</td><td><span class="tag t-p0">P0</span></td><td>批准后写入并留痕</td><td>审计流水新增一条，含角色、工具、参数摘要、时间</td><td>已实现</td></tr>
+<tr><td>FR-17</td><td><span class="tag t-p1">P1</span></td><td>CEO 跨职能写操作显示越权提示</td><td>CEO 调用 create_purchase_order，确认卡前置提示且审计记 override:true</td><td>已实现</td></tr>
+<tr><td>FR-18</td><td><span class="tag t-p1">P1</span></td><td>防「未查先写」</td><td>无任何读结果时直接调写工具 → 拒绝执行，不弹确认卡</td><td>已实现（Guard B）</td></tr>
+<tr><td colspan="5" style="background:#e8eef5"><b>D 组　可信度与降级</b></td></tr>
+<tr><td>FR-19</td><td><span class="tag t-p0">P0</span></td><td>数字带可溯源角标</td><td>回答中 <code>[[ref]]</code> 渲染为可点击角标，点击定位到对应记录</td><td>已实现</td></tr>
+<tr><td>FR-20</td><td><span class="tag t-p0">P0</span></td><td>无法解析的引用必须可见地标出</td><td>解析失败的角标显示红色删除线，答复末尾给出「已核实 N / 存疑 M」计数</td><td><b>已实现</b>（agent-design.md 误称未实现，见 A-06）</td></tr>
+<tr><td>FR-21</td><td><span class="tag t-p1">P1</span></td><td>查无结果显式返回而非编造</td><td>工具返回 {found:false, reason}，回答中明确说明未找到</td><td>已实现</td></tr>
+<tr><td>FR-22</td><td><span class="tag t-p0">P0</span></td><td>模型不可用时系统可降级使用</td><td>5 个数据页面独立于 Agent；失败卡后附引导</td><td>已实现</td></tr>
+<tr><td>FR-23</td><td><span class="tag t-p1">P1</span></td><td>模型错误分类提示</td><td>超时/限流/鉴权/网络/未知 五类各有对应话术</td><td>已实现</td></tr>
+<tr><td>FR-24</td><td><span class="tag t-p2">P2</span></td><td>会话按角色隔离、可归档</td><td>切换角色后进入该角色自己的会话；活跃上限 20 / 归档上限 30</td><td>已实现</td></tr>
+</tbody>
+</table>
+
+<h2 id="c3-5">3.5　Agent 能力面：15 个工具的规格</h2>
+
+<p>完整参数表见附录 A。此处只给设计层面的说明——<b>工具边界怎么划，才是 Agent 产品设计的核心工作</b>。</p>
+
+<h3>3.5.1　工具分组</h3>
+
+<table class="tight">
+<thead><tr><th style="width:14%">域</th><th style="width:36%">工具</th><th>设计意图</th></tr></thead>
+<tbody>
+<tr><td>CRM</td><td><code>query_customers</code> / <code>get_customer_detail</code> / <code>query_opportunities</code> / <code>create_followup_task</code>(写)</td><td>列表查询与详情分离：列表返回精简字段控制 token，详情按需展开</td></tr>
+<tr><td>ERP</td><td><code>query_sales_orders</code> / <code>get_order_detail</code> / <code>check_inventory</code> / <code>query_purchase_orders</code> / <code>get_supplier_options</code> / <code>create_purchase_order</code>(写)</td><td>同上；<code>get_supplier_options</code> 单独成工具是为了让「换供应商」成为可被模型发现的选项</td></tr>
+<tr><td>分析</td><td><code>query_receivables</code> / <code>aggregate_metrics</code> / <code>simulate_delivery_risk</code></td><td>把复杂计算封装成单次调用，避免模型自己聚合</td></tr>
+<tr><td>写</td><td><code>update_order_promise_date</code>(写) / <code>reserve_inventory</code>(写)</td><td>每个写工具对应一个明确的业务动作，不做通用 update</td></tr>
+</tbody>
+</table>
+
+<h3>3.5.2　工具边界的三条判据</h3>
+
+<table>
+<thead><tr><th style="width:26%">判据</th><th style="width:32%">说明</th><th>正例 / 反例</th></tr></thead>
+<tbody>
+<tr><td><b>① 一个工具 = 一个业务问题</b></td><td>不做「万能查询工具」，因为参数空间越大模型填错的概率越高</td><td>正例：<code>simulate_delivery_risk</code> 直接回答「哪些单会晚」；<b>反例</b>：如果只给 <code>query_orders</code> + <code>check_inventory</code>，模型必须自己做台账推演——而它一定会算错</td></tr>
+<tr><td><b>② 计算留在代码，不留给模型</b></td><td>凡涉及数值推演的，封装成工具而非让模型多次调用后自行汇总</td><td><code>aggregate_metrics</code> 返回聚合结果而非明细；模型拿到的就是最终数</td></tr>
+<tr><td><b>③ 写操作粒度对齐审批单元</b></td><td>写工具的粒度必须等于用户一次点「批准」愿意承担的责任范围</td><td>正例：<code>create_purchase_order</code> 一次一单；<b>反例</b>：批量下单工具——用户无法对一个批次做出有意义的确认</td></tr>
+</tbody>
+</table>
+
+<div class="box box-key">
+  <span class="bt">最能说明判据 ① 的一个例子：simulate_delivery_risk 为什么必须存在</span>
+  <p>假设不提供这个工具，模型要回答「哪几单会晚」必须：查库存拿到 42 → 查订单拿到三张单及各自数量与承诺日 → <b>按日期排序 → 逐单扣减台账 → 比对在途 PO 的 ETA → 判定风险等级</b>。加粗部分是纯计算，而语言模型做多步算术的可靠性众所周知。</p>
+  <p>更糟的是这类错误<b>看起来完全正常</b>——它会输出一个格式正确、语气笃定、数字错误的答案。而这恰恰是企业场景里最危险的失败模式。</p>
+  <p>所以：<b>凡是「规则明确、多步推演、错了不易被发现」的计算，一律封装成工具。</b>模型的职责缩减为「判断此刻该调这个工具」和「把结果讲成人话」——这两件事它做得比人好，而算术它做得比代码差。</p>
+</div>
+
+<h3>3.5.3　工具描述即产品文案</h3>
+
+<p>工具的 <code>description</code> 字段是模型选择工具的唯一依据，因此它是<b>写给模型看的产品文档</b>，需要按产品文案的标准打磨。本项目的三条约定：</p>
+
+<ul>
+<li><b>写清楚「什么时候用」而不只是「这是什么」</b>——例如 <code>simulate_delivery_risk</code> 的描述强调「当需要判断现有订单能否按承诺交期交付时使用」，而不是「模拟交付风险」。</li>
+<li><b>写清楚返回什么</b>——让模型能预判是否需要再调其它工具，减少无效轮次。</li>
+<li><b>默认值写进描述</b>——这一条<b>目前没做好</b>：多数工具的 <code>limit</code> 默认值 <code>?? 20</code> 写在代码里、不在 schema 描述中，模型不知道自己不传 limit 会得到 20 条。登记为 G-04。</li>
+</ul>
+
+<h2 id="c3-6">3.6　非功能需求</h2>
+
+<table>
+<thead><tr><th style="width:14%">类别</th><th style="width:22%">要求</th><th style="width:22%">当前实现</th><th>状态</th></tr></thead>
+<tbody>
+<tr><td>性能</td><td>首字延迟 &lt; 3s（P50）</td><td>Planner 一次调用后即渲染计划；换用 qwen-plus 后首字 0.42s<span class="tag t-meas">已实测 n=1</span></td><td>需扩大样本量验证</td></tr>
+<tr><td>性能</td><td>端到端 &lt; 30s（P90）</td><td>MAX_TURNS=12 × 45s 超时 = 理论最坏 9 分钟</td><td><span class="tag t-todo">待实测</span>，且缺少全局墙钟上限（G-05）</td></tr>
+<tr><td>可靠性</td><td>限流自动恢复</td><td>429 退避重试 [1.5s, 4s, 9s]，最多 4 次尝试</td><td>已实现</td></tr>
+<tr><td>可靠性</td><td>模型不可用时系统降级可用</td><td>5 个数据页面独立</td><td>已实现</td></tr>
+<tr><td>可复现</td><td>相同问题结果稳定</td><td>固定种子 42 + 固定 TODAY=2026-09-02 + temperature 0.2</td><td>数据层完全确定；模型层非确定</td></tr>
+<tr><td>安全</td><td>越权不可达</td><td>三层拦截（§2.6）</td><td>读路径完整；写路径 scope 覆盖 1/4（G-02）</td></tr>
+<tr><td>可审计</td><td>写操作全留痕</td><td>pushAudit 记录角色/工具/摘要/override 标记，上限 200 条</td><td>已实现；上限 200 为演示取值</td></tr>
+<tr><td>成本</td><td>单次会话可预算</td><td>历史 6 轮 + 300 字摘要折叠 + <code>present.ts</code> 工具结果投影裁剪</td><td><span class="tag t-meas">已实测</span>：单跳 7,747 输入 token，最贵一条 41,478（§5.5）</td></tr>
+</tbody>
+</table>
+
+<h2 id="c3-7">3.7　已知缺口登记册</h2>
+
+<p>下列缺口<b>全部经代码验证确认存在</b>。逐条给出影响判断和处理建议——把它们列出来，是因为一份不敢写缺口的 PRD 没有使用价值。</p>
+
+<table>
+<thead><tr><th style="width:7%">编号</th><th style="width:8%">严重度</th><th style="width:24%">缺口</th><th style="width:26%">影响</th><th>建议</th></tr></thead>
+<tbody>
+<tr><td>G-01</td><td><span class="tag t-p0">P0</span></td><td><code>create_followup_task</code> 与 <code>reserve_inventory</code> 的确认摘要是纯参数回显，零查库</td><td>违反 P3 原则：用户确认的是模型的转述而非真实动作。若模型填错客户 ID，确认卡上仍显示模型以为的那个名字</td><td>补齐 <code>confirmSummary</code> 的查库逻辑，摘要中的实体名必须来自数据库</td></tr>
+<tr><td>G-02</td><td><span class="tag t-p1">P1</span></td><td>写路径 scope 校验覆盖率 1/4，仅 <code>update_order_promise_date</code> 调用 <code>scopeOrders</code></td><td>越权写依赖「参数来自 scope 过的读结果」这一隐式约束，不是显式防线</td><td>4 个写工具统一在 <code>executeTool</code> 层强制 scope 校验</td></tr>
+<tr><td>G-03</td><td><span class="tag t-p1">P1</span></td><td>无主动推送，风险需用户提问才被发现</td><td>断点⑤ 只被部分消除——用户不问就还是不知道</td><td>V1.5 增加定时扫描 + 站内提醒；注意这是脚本能力（方案 F），不需要模型</td></tr>
+<tr><td>G-04</td><td><span class="tag t-p2">P2</span></td><td>工具 <code>limit</code> 默认值（<code>?? 20</code>）不在 schema 描述中</td><td>模型不知道结果被截断，可能基于不完整数据下结论</td><td>把默认值写进 description；或在返回中附 <code>truncated: true</code></td></tr>
+<tr><td>G-05</td><td><span class="tag t-p1">P1</span></td><td>无全局墙钟上限，理论最坏 12 × 45s</td><td>极端情况下用户面对长时间无响应</td><td>增加整体超时（建议 90s）并给出部分结果</td></tr>
+<tr><td>G-06</td><td><span class="tag t-p1">P1</span></td><td>HITL 确认无超时/取消机制</td><td>确认卡挂起后若用户离开，Promise 永不 resolve，该会话状态泄漏</td><td>增加确认超时（建议 5 分钟）自动视为拒绝</td></tr>
+<tr><td>G-07</td><td><span class="tag t-p2">P2</span></td><td><code>found:false</code> 语义重载：无数据 / 无权限 / 业务失败（库存不足）共用一个标记</td><td>模型无法区分「查不到」和「不让你查」，回答话术可能失当</td><td>拆成 <code>reasonCode</code> 枚举</td></tr>
+<tr><td>G-08</td><td><span class="tag t-p2">P2</span></td><td><code>stepIdx</code> 按 LLM 轮次递增，与实际步骤不对齐</td><td>UI 上的步骤高亮可能与真实进度不符</td><td>改为由工具调用归属映射到步骤</td></tr>
+<tr><td>G-09</td><td><span class="tag t-p2">P2</span></td><td><code>query_purchase_orders</code> 是唯一不返回 <code>scope</code> 字段的受限读工具</td><td>该工具下 hidden 披露机制失效</td><td>补齐 scope 字段</td></tr>
+<tr><td>G-10</td><td><span class="tag t-p1">P1</span></td><td><code>maskOrderForRole</code> 定义后无人调用，遮蔽逻辑在 <code>present.ts</code> 另有一份</td><td>双实现，后续修改易分歧</td><td>删除死代码，统一到 present.ts</td></tr>
+<tr><td>G-11</td><td><span class="tag t-p1">P1</span></td><td>端到端回归的每条场景<b>只跑过一遍</b>，无跑间方差、无中位数与 P90，且不进 CI</td><td>模型是非确定性的：同一问题两次跑出来的工具链和 token 都会变（<code>rep-2</code> 已实测到过一次走明细查询、一次走边界引导）。<b>单次观测不能作为门槛判据</b>——§6.8 的所有阈值都需要区间而非点估计</td><td>每条跑 5~10 遍取中位数与 P90；把 14 条回归接入夜间定时任务（不进每次提交，见 §7.2 分层门禁）</td></tr>
+</tbody>
+</table>
+
+<h2 id="c3-8">3.8　版本规划 V1 / V1.5 / V2</h2>
+
+<table>
+<thead><tr><th style="width:12%">版本</th><th style="width:26%">主题</th><th style="width:32%">范围</th><th>准出条件</th></tr></thead>
+<tbody>
+<tr><td><b>V1</b><br><span class="small">当前</span></td><td>可信的只读问答 + 受控写入</td><td>15 工具、四角色、HITL、溯源角标、5 个数据页</td><td>修复 G-11（测试）与 G-01（确认摘要）；完成 §6.5 的 60 条评测集首轮跑分</td></tr>
+<tr><td><b>V1.5</b></td><td>从「问了才知道」到「不问也知道」</td><td>定时风险扫描 + 站内提醒（G-03）；补齐写路径 scope（G-02）；全局超时与确认超时（G-05/G-06）；埋点上线（§7.1）</td><td>L1 指标达 §6.8 门槛；连续 2 周线上 badcase 率下降</td></tr>
+<tr><td><b>V2</b></td><td>真实系统对接与能力扩展</td><td>接入真实 ERP/CRM 只读 API；工具集扩展（§8.2 准入判据）；多轮长程记忆按实测轮次分布决定是否做</td><td>真实数据下 L1 指标不低于模拟数据下的 90%</td></tr>
+</tbody>
+</table>
+
+<div class="box box-warn">
+  <span class="bt">版本规划里最容易被跳过、但最不该跳过的一条</span>
+  <p>V2 的准出条件写的是「<b>真实数据下 L1 指标不低于模拟数据下的 90%</b>」，而不是「接入完成」。</p>
+  <p>原因：本项目全部指标都建立在固定种子生成的数据上——数据干净、字段完整、无脏值、无歧义命名。真实 ERP 里同一个客户可能有三个名字、订单状态字段可能有历史遗留的枚举值、库存表可能有负数。<b>模拟数据上的高准确率不能外推到真实数据。</b></p>
+  <p>把这个衰减幅度设为 V2 的准出门槛，等于承认「接入真实数据是一次会掉分的迁移」，并提前给出可接受的掉分幅度。这比接完再发现问题要好得多。</p>
+</div>

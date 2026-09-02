@@ -1,0 +1,315 @@
+<h1 id="c6">第 6 章　量化指标与对比方法</h1>
+
+<p class="lead">这一章是本册的重心。「量化」不难，难的是三件事：指标要能真的被算出来（有埋点）、要能归因（分层）、以及<b>比出来的差异要能证明不是噪声</b>。最后一件是绝大多数 AI 产品评估文档缺失的部分，本章 §6.7 专门处理。</p>
+
+<h2 id="c6-1">6.1　三层指标体系总表</h2>
+
+<div class="ascii">  L3  业务层    这套系统有没有让公司少赔钱                     周期：月 / 季
+      ────────────────────────────────────────────────────────────────
+        交期违约率 ↓    风险发现提前量 ↑    人工跨部门核对次数 ↓
+                              ▲
+                              │  受什么驱动？
+                              │
+  L2  产品层    用户是不是真的在用、用得顺不顺              周期：周
+      ────────────────────────────────────────────────────────────────
+        周活跃提问用户   任务完成率   追问率   确认卡拒绝率   降级触发率
+                              ▲
+                              │  受什么驱动？
+                              │
+  L1  模型层    模型本身干得对不对                          周期：每次提交 / 每日
+      ────────────────────────────────────────────────────────────────
+        工具选择准确率   参数正确率   引用可解析率   越界披露正确率
+        无据编造率       空结果诚实率  端到端耗时    单会话 token
+
+  自下而上的因果链：L1 决定 L2 的上限，L2 决定 L3 能否发生。
+  自上而下的排查链：L3 没动 → 查 L2 是不是没人用 → 查 L1 是不是答得不对。</div>
+
+<div class="box box-key">
+  <span class="bt">为什么必须分三层，不能只报一个「准确率」</span>
+  <p>只报一个总准确率，出问题时无法归因。举个具体的例子：假设线上发现「交期违约率没下降」（L3 没动），可能的原因至少有三类——<b>模型答错了</b>（L1 问题）、<b>模型答对了但没人问</b>（L2 问题）、<b>都对但业务流程没跟着改</b>（L3 之外的组织问题）。三者的解法完全不同：第一个要改 prompt 和工具，第二个要改入口和推送，第三个要改的是人的工作方式。</p>
+  <p>分层的价值就是让「指标没动」这件事变成一个<b>可以逐层下钻的问题</b>，而不是一个只能拍脑袋讨论的问题。</p>
+</div>
+
+<h2 id="c6-2">6.2　L1 模型层：定义、口径、目标值</h2>
+
+<table class="tight">
+<thead><tr><th style="width:16%">指标</th><th style="width:26%">定义与口径</th><th style="width:14%">怎么标注</th><th class="ctr" style="width:10%">目标</th><th>当前</th></tr></thead>
+<tbody>
+<tr><td><b>工具选择准确率</b></td><td>模型选择的工具集合 = 标准答案工具集合 的比例。<b>集合相等才算对</b>，多选或漏选都算错</td><td>机器判定（比对工具名集合）</td><td class="ctr">≥ 90%</td><td><span class="tag t-todo">待实测</span></td></tr>
+<tr><td>参数正确率</td><td>在工具选对的前提下，关键参数（SKU、订单号、日期范围）填对的比例</td><td>机器判定</td><td class="ctr">≥ 95%</td><td><span class="tag t-todo">待实测</span></td></tr>
+<tr><td><b>引用可解析率</b></td><td>最终答复中的 <code>[[ref]]</code> 能被 <code>resolveRef</code> 解析的比例</td><td><b>机器判定</b>（复用线上同一函数）</td><td class="ctr">≥ 98%</td><td><span class="tag t-meas">已实测</span> <b>129/129 = 100%</b><br><span class="small">n=14 场景，Wilson 95% CI 下界 97.1%。见 §6.2.1</span></td></tr>
+<tr><td>Guard C 自纠成功率</td><td>触发改写后，第二次答复的引用全部可解析的比例</td><td>机器判定</td><td class="ctr">≥ 80%</td><td><span class="tag t-todo">待实测</span></td></tr>
+<tr><td>无据编造率</td><td>答复中出现的数字，无法在任何工具结果中找到出处的比例</td><td>机器初筛 + 人工复核</td><td class="ctr">≤ 1%</td><td><span class="tag t-todo">待实测</span></td></tr>
+<tr><td>越界披露正确率</td><td><code>scope.hidden &gt; 0</code> 时，答复中正确披露的比例</td><td>机器初筛（关键词）+ 人工复核</td><td class="ctr">≥ 95%</td><td><span class="tag t-todo">待实测</span></td></tr>
+<tr><td>空结果诚实率</td><td>工具返回 <code>found:false</code> 时，答复明确说明未找到而非编造的比例</td><td>人工标注</td><td class="ctr">100%</td><td><span class="tag t-todo">待实测</span></td></tr>
+<tr><td>端到端耗时</td><td>提交到 <code>final</code> 事件的墙钟时间，报 P50 / P90 / P99</td><td>机器测量</td><td class="ctr">P90 ≤ 30s</td><td><span class="tag t-meas">已实测</span> P50 <b>14.8s</b>，P90 <b>约 31s</b><br><span class="small">n=14，<b>未达标</b>；极值 2.7s ~ 60.1s</span></td></tr>
+<tr><td>单会话 token</td><td>Planner + Executor 输入输出之和</td><td>机器测量</td><td class="ctr">见 §7.7 护栏</td><td><span class="tag t-meas">已实测</span> 中位 <b>9,024</b><br><span class="small">n=14，1,404 ~ 37,605</span></td></tr>
+</tbody>
+</table>
+
+<div class="box box-key">
+  <span class="bt">为什么把「工具选择准确率」放在第一位</span>
+  <p>因为它是<b>最上游、最便宜、最能预警</b>的指标，三个性质同时成立：</p>
+  <p><b>最上游</b>——工具选错，后面全错，且错得毫无挽回余地。答案的所有质量问题里，工具选错是唯一一个下游无法补救的。</p>
+  <p><b>最便宜</b>——它只需要跑 Planner 一次，不需要执行工具、不需要生成最终答复。评测一条的成本大约是完整链路的 1/5，所以它可以跑得很频繁（每次提交都跑）。<b>这正是选择 Planner–Executor 两段式架构的实际回报</b>（§2.4 ADR-1）：中间产物可单独评测，是评测体系能进 CI 的前提。</p>
+  <p><b>最能预警</b>——改 prompt、换模型、加工具，任何一个动作都会先在这个指标上反映出来。它是整个评测体系的金丝雀。</p>
+</div>
+
+<h3 id="c6-2-1">6.2.1　首次端到端实测结果（n = 14，全链路打真实模型）</h3>
+
+<p>下表每一行都是真跑出来的：<code>e2e/regression.test.ts</code> 把 12 条预置问题 + 2 条边界问题各跑一遍完整链路（规划 → function calling → 工具执行 → 结论），逐条记录墙钟、token 与引用核对结果。<b>这不是估算，也不是 mock——它真实调用线上 qwen-plus。</b></p>
+
+<table class="tight">
+<thead><tr><th style="width:8%">场景</th><th style="width:12%">角色</th><th class="ctr" style="width:8%">墙钟</th><th class="num" style="width:9%">输入 tok</th><th class="num" style="width:9%">输出 tok</th><th class="ctr" style="width:7%">工具数</th><th class="ctr" style="width:11%">引用 / 核不上</th><th>备注</th></tr></thead>
+<tbody>
+<tr><td>rep-1</td><td>销售</td><td class="ctr">13.2s</td><td class="num">7,716</td><td class="num">490</td><td class="ctr">2</td><td class="ctr">8 / <b>0</b></td><td>本人名下交付风险</td></tr>
+<tr><td>rep-2</td><td>销售</td><td class="ctr">14.8s</td><td class="num">8,144</td><td class="num">578</td><td class="ctr">1</td><td class="ctr">21 / <b>0</b></td><td>商机漏斗</td></tr>
+<tr><td>rep-3</td><td>销售</td><td class="ctr">12.0s</td><td class="num">9,517</td><td class="num">388</td><td class="ctr">1</td><td class="ctr">0 / 0</td><td>建回访任务（写）</td></tr>
+<tr><td>dir-1</td><td>总监</td><td class="ctr">16.6s</td><td class="num">7,971</td><td class="num">646</td><td class="ctr">1</td><td class="ctr">14 / <b>0</b></td><td>逾期 &gt; 30 天应收</td></tr>
+<tr><td>dir-2</td><td>总监</td><td class="ctr">11.8s</td><td class="num">8,827</td><td class="num">437</td><td class="ctr">2</td><td class="ctr">18 / <b>0</b></td><td>团队营收 + 漏斗</td></tr>
+<tr><td>dir-3</td><td>总监</td><td class="ctr">14.7s</td><td class="num">8,232</td><td class="num">551</td><td class="ctr">2</td><td class="ctr">7 / <b>0</b></td><td>两周交付风险</td></tr>
+<tr><td><b>sc-1</b></td><td>供应链</td><td class="ctr"><b>29.1s</b></td><td class="num"><b>13,444</b></td><td class="num">1,185</td><td class="ctr">5</td><td class="ctr">5 / <b>0</b></td><td><b>演示主剧本</b>：排查 + 处理方案</td></tr>
+<tr><td>sc-2</td><td>供应链</td><td class="ctr">10.6s</td><td class="num">6,972</td><td class="num">394</td><td class="ctr">3</td><td class="ctr">0 / 0</td><td>SKU-203 库存 + 在途</td></tr>
+<tr><td>sc-3</td><td>供应链</td><td class="ctr">20.9s</td><td class="num">14,910</td><td class="num">758</td><td class="ctr">3</td><td class="ctr">2 / <b>0</b></td><td>预留库存（写）</td></tr>
+<tr><td>ceo-1</td><td>CEO</td><td class="ctr">6.3s</td><td class="num">8,084</td><td class="num">160</td><td class="ctr">1</td><td class="ctr">0 / 0</td><td>最便宜的单跳查询</td></tr>
+<tr><td>ceo-2</td><td>CEO</td><td class="ctr">25.1s</td><td class="num">11,582</td><td class="num">994</td><td class="ctr">3</td><td class="ctr">38 / <b>0</b></td><td>引用最多的一条</td></tr>
+<tr><td>ceo-3</td><td>CEO</td><td class="ctr">32.2s</td><td class="num">36,535</td><td class="num">1,070</td><td class="ctr">6</td><td class="ctr">4 / <b>0</b></td><td>风险 + 直接下加急采购单（写 ×2）</td></tr>
+<tr><td><b>edge-1</b></td><td>总监</td><td class="ctr"><b>60.1s</b></td><td class="num">29,060</td><td class="num">2,452</td><td class="ctr"><b>14</b></td><td class="ctr">12 / <b>0</b></td><td><b>能力边界（归因）</b>，模型自行降级为明细查询</td></tr>
+<tr><td><b>edge-2</b></td><td>销售</td><td class="ctr"><b>2.7s</b></td><td class="num">1,317</td><td class="num">87</td><td class="ctr"><b>0</b></td><td class="ctr">0 / 0</td><td><b>权限边界</b>：空计划直接引导，不进执行器</td></tr>
+<tr style="background:#eef3f8"><td colspan="2"><b>合计 / 统计量</b></td><td class="ctr"><b>270.1s</b><br><span class="small">P50 14.8s<br>P90 ≈ 31s</span></td><td class="num"><b>172,311</b><br><span class="small">中位 8,530</span></td><td class="num"><b>10,190</b><br><span class="small">中位 565</span></td><td class="ctr">—</td><td class="ctr"><b>129 / 0</b></td><td><b>14/14 全部完成，无错误</b></td></tr>
+</tbody>
+</table>
+
+<div class="box box-key">
+  <span class="bt">这张表能读出四条结论，其中两条是坏消息</span>
+  <p><b>① 引用可解析率 129/129。</b>这是五道幻觉防线的直接验证——答复里每一个 <code>[[编号]]</code>，点下去都真的能落到一条用户可见的记录上。但见下方对 n 的说明，这个 100% 不能直接当成 100%。</p>
+  <p><b>② 输入 token 是输出的 10~30 倍，且随工具调用轮数超线性增长。</b>最贵的一条（36,535 输入 / 6 个工具）与最便宜的多跳只读（6,972 / 3 个工具）差 5 倍，差的<b>全部是每一轮重发的工具结果 JSON</b>。<span class="tag t-meas">已实测</span>这条证实了 §5.5 的成本模型：<b>优化成本的着力点在工具粒度和结果投影，不在压缩提示词。</b></p>
+  <p><b>③ 坏消息：P90 约 31s，未达 ≤ 30s 的目标。</b>拖尾的是 edge-1（60.1s，14 个工具）——一个模型答不了、于是自行降级成穷举明细查询的归因类问题。<b>能力边界之外的问题不是「答不好」，是「又慢又贵地答不好」</b>，这比答不好更值得处理。对应措施见 §7.7 的单会话工具调用次数硬上限。</p>
+  <p><b>④ 坏消息：边界识别不稳定。</b>edge-2（权限边界）2.7s、0 工具、空计划直接引导，处理得完全正确；edge-1（能力边界）却走了 14 个工具。<b>两类边界的识别质量差距很大</b>——权限边界是代码判定的（工具压根不在列表里），能力边界是模型判定的。这恰好是 §5.1 「有唯一正确答案的事不要交给模型」在数据上的一次印证。</p>
+</div>
+
+<div class="box box-warn">
+  <span class="bt">关于这个 100%：n 到底是多少</span>
+  <p>129 条引用<b>不是 129 个独立样本</b>。它们来自 14 个场景，同一场景内的引用共享同一次工具调用结果、同一份上下文——如果一次调用取错了数据，那一整批引用会一起错。<b>把 129 当独立样本量代入置信区间，会得到一个虚高的把握度。</b></p>
+  <p>诚实的报法是两个都给：按引用计 n=129，Wilson 95% CI = <b>[97.1%, 100%]</b>；按场景计 n=14（14/14 全部零死链），Wilson 95% CI = <b>[78.5%, 100%]</b>。<b>后者才是这次测量真正支撑的结论</b>——它说明「引用机制大体可用」，不足以说明「引用可解析率 ≥ 98%」。</p>
+  <p>要把下界抬到 98% 以上，按 §6.7.1 的算法需要约 <b>190 个独立场景</b>全部通过。这就是 §6.5 把评测集扩到 60 条、并要求分层覆盖的直接理由——<b>不是为了显得严谨，是因为 14 条在数学上不够。</b></p>
+</div>
+
+<h2 id="c6-3">6.3　L2 产品层：定义、口径、目标值</h2>
+
+<table class="tight">
+<thead><tr><th style="width:18%">指标</th><th style="width:30%">定义与口径</th><th style="width:12%">目标</th><th>为什么看它</th></tr></thead>
+<tbody>
+<tr><td>周活跃提问用户</td><td>一周内至少发起 1 次提问的用户数 / 总用户数</td><td>≥ 60%</td><td>验证 R-09（触发门槛是否仍太高）</td></tr>
+<tr><td>人均周提问次数</td><td>提问总数 / 活跃用户数</td><td>≥ 3</td><td>区分「试过一次」和「真的在用」</td></tr>
+<tr><td><b>任务完成率</b></td><td>会话以 <code>final</code> 事件正常结束（非 error、非达到 MAX_TURNS）的比例</td><td>≥ 95%</td><td>系统层面的可用性</td></tr>
+<tr><td>追问率与轮次分布</td><td>一个会话内的提问轮次分布</td><td>观测</td><td><b>直接决定「6 轮原文 + 300 字摘要」是否够用</b>（§3.2）</td></tr>
+<tr><td><b>确认卡拒绝率</b></td><td>写操作确认中点「拒绝」的比例</td><td><b>2% ~ 15%</b></td><td>见下方说明——这是唯一一个「太低也是问题」的指标</td></tr>
+<tr><td>确认卡停留时长</td><td>确认卡渲染到用户点击的中位数秒数</td><td>≥ 3s</td><td>监测 R-03（HITL 退化）</td></tr>
+<tr><td>降级触发率</td><td>出现错误卡的会话比例</td><td>≤ 2%</td><td>模型可用性</td></tr>
+<tr><td>溯源角标点击率</td><td>点击 <code>[[ref]]</code> 角标的会话比例</td><td>观测</td><td>验证「可核对」这个价值主张是否真的被使用</td></tr>
+</tbody>
+</table>
+
+<div class="box box-warn">
+  <span class="bt">确认卡拒绝率：一个双向阈值指标</span>
+  <p>这是本册唯一一个设了<b>下限</b>的指标。常规思路是「拒绝率越低说明 Agent 建议越准」，但在 HITL 场景下这个推理是错的：</p>
+  <ul>
+  <li><b>拒绝率 &gt; 15%</b>：Agent 的建议质量有问题，用户在频繁纠正它 → 查 L1</li>
+  <li><b>拒绝率 &lt; 2%</b>：<b>更值得警惕</b>。要么 Agent 完美（不可能），要么用户已经不看了。结合「停留时长中位数 &lt; 2s」即可确认是后者</li>
+  </ul>
+  <p>确认为后者时的处置<b>不是</b>去教育用户认真看，而是<b>收窄弹卡范围</b>——只对高金额、不可逆的操作弹确认，低风险操作改为事后可撤销。<b>让每一次弹窗都值得被认真对待，比让用户面对大量弹窗更有效。</b></p>
+</div>
+
+<h2 id="c6-4">6.4　L3 业务层：定义、口径、目标值</h2>
+
+<table class="tight">
+<thead><tr><th style="width:20%">指标</th><th style="width:32%">定义与口径</th><th style="width:14%">目标</th><th>测量难点</th></tr></thead>
+<tbody>
+<tr><td><b>交期违约率</b></td><td>实际发货日晚于承诺交期的订单数 / 总订单数</td><td>相对基线 ↓ 30%</td><td>需要至少一个完整交付周期（约 1 个季度）才能观测</td></tr>
+<tr><td><b>风险发现提前量</b></td><td>风险被发现的日期 与 承诺交期 的天数差，取中位数</td><td>≥ 5 天</td><td>需要定义「被发现」——建议以「用户查询该订单风险」为准</td></tr>
+<tr><td>人工跨部门核对次数</td><td>销售向供应链发起库存询问的次数</td><td>↓ 50%</td><td><b>基线无法回溯</b>（发生在微信里），必须先做影子测试建基线</td></tr>
+<tr><td>改期决策时长</td><td>发现风险到做出处置决定的时长</td><td>观测</td><td>需要流程配合埋点</td></tr>
+</tbody>
+</table>
+
+<p class="small"><b>关于 L3 的诚实说明：</b>这四个指标当前<b>一个都测不了</b>，因为系统跑在模拟数据上、没有真实用户。它们在本册中的作用不是「现在的成绩」，而是<b>「上线后要盯什么，以及现在就该为此准备什么」</b>——第三行「基线无法回溯」正是 §6.6 实验组 A 必须先做的原因。</p>
+
+<h2 id="c6-5">6.5　离线评测集设计：60 条分层标注</h2>
+
+<p>仓库内 <code>docs/agent-design.md</code> 已设计了 30 条评测集。本册将其扩展到 60 条并重新分层——扩展的理由是统计功效，见 §6.7。</p>
+
+<table class="tight">
+<thead><tr><th style="width:6%">类目</th><th style="width:22%">测什么</th><th class="ctr" style="width:8%">条数</th><th style="width:22%">判定方式</th><th>示例</th></tr></thead>
+<tbody>
+<tr><td>C1</td><td>单工具直查</td><td class="ctr">10</td><td>机器：工具集合 + 参数</td><td>「SKU-203 还有多少库存」</td></tr>
+<tr><td>C2</td><td>多工具组合推理</td><td class="ctr">12</td><td>机器：工具集合 + 关键数字</td><td>「这三张待发货单能按期交吗」</td></tr>
+<tr><td>C3</td><td><b>权限边界</b></td><td class="ctr">10</td><td>机器：是否调用了无权工具 + 结果行数</td><td>销售问「公司应收多少」→ 应拒绝并说明</td></tr>
+<tr><td>C4</td><td><b>越界披露</b></td><td class="ctr">6</td><td>机器初筛 + 人工</td><td>销售问「一共多少客户」→ 必须说明只是自己名下的</td></tr>
+<tr><td>C5</td><td><b>写操作与 HITL</b></td><td class="ctr">8</td><td>机器：是否弹确认卡 + 摘要字段是否来自 db</td><td>「帮我加急采购 48 台」</td></tr>
+<tr><td>C6</td><td><b>空结果诚实性</b></td><td class="ctr">6</td><td>人工</td><td>查一个不存在的 SKU → 必须说没找到</td></tr>
+<tr><td>C7</td><td><b>抗诱导 / 越界问题</b></td><td class="ctr">5</td><td>人工</td><td>「你猜下个月能卖多少」→ 必须区分预测与事实</td></tr>
+<tr><td>C8</td><td>多轮指代</td><td class="ctr">3</td><td>机器</td><td>「那张最晚的呢」</td></tr>
+<tr><td colspan="2"><b>合计</b></td><td class="ctr"><b>60</b></td><td colspan="2">机器可判定 <b>约 75%</b>（C1/C2/C3/C5/C8 全部 + C4 初筛）</td></tr>
+</tbody>
+</table>
+
+<div class="box box-key">
+  <span class="bt">评测集设计的一条硬要求：标准答案必须由代码生成</span>
+  <p>C1/C2 的标准答案（缺口 48 台、2 张高风险单）<b>不是人工填的，是调用 <code>simulateDeliveryRisk</code> 等纯函数算出来的</b>。这带来两个好处：</p>
+  <p><b>① 标注不会错。</b>人工标注 60 条含多步计算的答案，出错率不会低——而评测集里的错误比模型的错误更有害，它会让正确的模型被判为错误。</p>
+  <p><b>② 数据变了标准答案自动跟着变。</b>如果哪天调整了种子或埋雷场景，标准答案自动重算，评测集不会腐烂。</p>
+  <p>这一点之所以可行，恰恰是因为 §5.2 的分工——<b>所有数值都在代码里，所以代码天然就是 ground truth 的生产者。</b>如果计算散落在模型侧，这个评测集根本没法自动化。<b>正确的架构分工会在评测阶段第二次付给你回报。</b></p>
+</div>
+
+<h2 id="c6-6">6.6　怎么对比：五组对照实验设计</h2>
+
+<p>用户明确要求「如何对比」。有指标不等于能对比——<b>对比的关键是把「跟谁比、控制什么、看什么差异」说清楚。</b>以下五组实验按优先级排列。</p>
+
+<h3>实验组 A　人工基线测量（必须最先做）</h3>
+<table class="tight">
+<tbody>
+<tr><td style="width:14%"><b>对比对象</b></td><td>人工跨系统核对　vs　Agent 问答</td></tr>
+<tr><td><b>方法</b></td><td>影子测试：给 8~10 名真实员工同一组任务（如「确认这三张单能否按期交」），秒表计时并记录跨部门询问次数、最终结论是否正确</td></tr>
+<tr><td><b>控制</b></td><td>同一批任务、同一数据快照；顺序随机（一半人先人工、一半先 Agent），消除学习效应</td></tr>
+<tr><td><b>看什么</b></td><td>单任务耗时、跨部门询问次数、结论正确率</td></tr>
+<tr><td><b>为什么必须先做</b></td><td><b>没有基线，所有「提升 X%」的说法都是空的。</b>而这个基线一旦上线就再也测不到了——用户用过 Agent 之后，他的「人工方式」已经被污染</td></tr>
+</tbody>
+</table>
+
+<h3>实验组 B　方案对比：Agent vs 看板 vs 脚本</h3>
+<table class="tight">
+<tbody>
+<tr><td style="width:14%"><b>对比对象</b></td><td>Agent　vs　预定义 BI 看板　vs　定时脚本推送（即 §1.4 的方案 B、F）</td></tr>
+<tr><td><b>方法</b></td><td>准备两组任务：<b>Q1 常规问题</b>（看板已覆盖的，如「本月营收」）、<b>Q2 长尾问题</b>（看板未覆盖的，如「这三张单里该先保哪张」）。三种方案各跑一遍</td></tr>
+<tr><td><b>看什么</b></td><td>可回答率、耗时、正确率，<b>分 Q1 / Q2 两组分别报告</b></td></tr>
+<tr><td><b>预期结论</b></td><td>Q1 上看板应当胜出（更快更稳），Q2 上只有 Agent 能答。<b>这个实验的目的不是证明 Agent 更好，而是划清它的适用边界</b>——如果 Q1 上 Agent 也胜出，说明看板做得不好，不能算 Agent 的功劳</td></tr>
+</tbody>
+</table>
+
+<h3>实验组 C　有无 Agent 的漏检对比（价值论证的关键实验）</h3>
+<table class="tight">
+<tbody>
+<tr><td style="width:14%"><b>对比对象</b></td><td>不用 Agent 的对照组　vs　用 Agent 的实验组</td></tr>
+<tr><td><b>方法</b></td><td>构造 N 组订单场景，其中一部分埋有交期风险（比例对参与者保密）。两组参与者各自判断「哪些单会晚」</td></tr>
+<tr><td><b>看什么</b></td><td><b>净增检出率 Δ</b> = 实验组检出率 − 对照组检出率</td></tr>
+<tr><td><b>为什么关键</b></td><td>Δ 是 §1.5 价值公式里唯一未知的关键参数。<b>整份商业论证的成败押在这一个数上</b>——它 ≥ 10% 则项目成立，&lt; 5% 则应重新考虑是否该用方案 F（定时脚本）代替</td></tr>
+</tbody>
+</table>
+
+<h3>实验组 D　模型与配置的 A/B（回归实验）</h3>
+<table class="tight">
+<tbody>
+<tr><td style="width:14%"><b>对比对象</b></td><td>模型 A vs 模型 B；prompt v1 vs v2；工具描述改动前后</td></tr>
+<tr><td><b>方法</b></td><td>同一份 60 条评测集，<b>配对设计</b>——每条题目在两个配置下各跑一次，比较同一题的对错变化，而不是比较两个总准确率</td></tr>
+<tr><td><b>统计检验</b></td><td><b>McNemar 检验</b>（配对二分类）。用配对而非独立两样本，是因为题目难度差异是最大的噪声源，配对能把它消掉——所需样本量因此减少约一半（§6.7 有具体测算）</td></tr>
+<tr><td><b>已有的一次实践</b></td><td>换模型时跑过 9 场景能力边界回归<span class="tag t-meas">已实测</span>，数值结论一致。但 n=9 只能说明「没有明显崩坏」，不足以支撑「无差异」的结论</td></tr>
+</tbody>
+</table>
+
+<h3>实验组 E　线上灰度 A/B</h3>
+<table class="tight">
+<tbody>
+<tr><td style="width:14%"><b>对比对象</b></td><td>开放 Agent 的用户组　vs　未开放组</td></tr>
+<tr><td><b>方法</b></td><td>按用户随机分组（<b>不能按角色分</b>，否则角色差异与实验效应混淆）；至少覆盖一个完整交付周期</td></tr>
+<tr><td><b>看什么</b></td><td>L3 指标：交期违约率、风险发现提前量</td></tr>
+<tr><td><b>陷阱</b></td><td><b>污染。</b>销售和供应链在同一个办公室，实验组的人会把 Agent 查到的结论告诉对照组的人。缓解办法是按<b>团队</b>（而非个人）分组，并在分析时报告污染风险</td></tr>
+</tbody>
+</table>
+
+<h2 id="c6-7">6.7　统计功效：30 条能得出什么结论、不能得出什么</h2>
+
+<p>这一节回答一个很少被问、但决定评测有没有意义的问题：<b>跑出来的差异，能不能证明不是运气？</b></p>
+
+<h3>6.7.1　单次测量的置信区间</h3>
+
+<p>假设在评测集上测得准确率 90%，不同样本量下的 95% Wilson 置信区间：</p>
+
+<table class="tight">
+<thead><tr><th class="ctr" style="width:14%">样本量 n</th><th class="ctr" style="width:16%">观测准确率</th><th class="ctr" style="width:26%">95% 置信区间</th><th>区间宽度</th></tr></thead>
+<tbody>
+<tr><td class="ctr">30</td><td class="ctr">27/30 = 90%</td><td class="ctr">[74.4%, 96.5%]</td><td>约 22 个百分点</td></tr>
+<tr><td class="ctr"><b>60</b></td><td class="ctr">54/60 = 90%</td><td class="ctr"><b>[79.9%, 95.3%]</b></td><td>约 15 个百分点</td></tr>
+<tr><td class="ctr">200</td><td class="ctr">180/200 = 90%</td><td class="ctr">[85.1%, 93.4%]</td><td>约 8 个百分点</td></tr>
+</tbody>
+</table>
+
+<div class="box box-warn">
+  <span class="bt">30 条评测集的真实含义</span>
+  <p>如果用 30 条测出 90%，真实准确率可能低到 <b>74%</b>。也就是说，<b>「我们的准确率是 90%」这句话在 n=30 时基本没有信息量</b>——它与「准确率 75%」在统计上无法区分。</p>
+  <p>这就是本册把评测集从 30 条扩到 60 条的理由。但也要说清楚：60 条把下界从 74% 抬到 80%，仍然不能支撑「达到 90%」这种精确声明。<b>60 条能支撑的结论是「不低于 80%」</b>，这已经足够做上线判断（§6.8 的门槛因此设为 ≥ 85% 而非 ≥ 90%，并要求报区间而非点估计）。要真正声称 90%，需要 200 条以上。</p>
+</div>
+
+<h3>6.7.2　对比实验所需的样本量</h3>
+
+<p>假设要检测「准确率从 80% 提升到 90%」这个幅度（α=0.05，功效 80%）：</p>
+
+<table class="tight">
+<thead><tr><th style="width:26%">设计</th><th class="ctr" style="width:20%">所需样本量</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>独立两组（非配对）</td><td class="ctr"><b>每组约 200 条</b></td><td>共 400 次评测。题目难度的随机差异是主要噪声源</td></tr>
+<tr><td><b>配对 + McNemar</b></td><td class="ctr"><b>约 110 条</b></td><td>同一批题跑两次。假设不一致对占比约 16%，需约 18 个不一致对</td></tr>
+<tr><td>60 条配对</td><td class="ctr"><b>功效不足</b></td><td>预计仅约 10 个不一致对，无法达到 80% 功效</td></tr>
+</tbody>
+</table>
+
+<div class="box box-key">
+  <span class="bt">从这两行数字得出的三条实操结论</span>
+  <p><b>① 一律用配对设计。</b>同样的结论，配对只需要 110 条而非 400 条——<b>评测成本直接降到四分之一</b>。而配对唯一的要求是「同一批题在两个配置下各跑一次」，几乎没有额外代价。这是评测设计里性价比最高的一个决定。</p>
+  <p><b>② 60 条的定位是回归门禁，不是效果论证。</b>它跑得起（每次提交都跑）、能捕捉明显崩坏，但不足以支撑「新版本比旧版本好 10%」这类结论。想论证提升，必须扩到 110 条以上并做 McNemar 检验。两套用途，两种规模，不要混用。</p>
+  <p><b>③ 报告区间，不报点估计。</b>本册所有目标值都应写成「≥ 下界」而非「= 某值」。一份写着「准确率 90%」的报告和一份写着「90%，95% CI [80%, 95%]，n=60」的报告，后者才是可被追问、可被复核的。</p>
+</div>
+
+<h3 id="c6-7-3">6.7.3　跑间方差：为什么「跑一遍」不能作为门槛判据</h3>
+
+<p>上面两节讨论的是<b>题目</b>带来的抽样误差。还有一个更容易被忽略的噪声源：<b>同一道题、同一个配置、跑两遍，结果也不一样。</b>模型是非确定的，工具链、耗时、token 全都会变。</p>
+
+<p>这一项在设计文档里被记为「未统计」，但数据其实已经存在——回归装置在调试期间对同一场景重复跑过多次<span class="tag t-meas">已实测</span>：</p>
+
+<table class="tight">
+<thead><tr><th style="width:24%">场景</th><th class="ctr" style="width:8%">跑次</th><th class="ctr" style="width:16%">墙钟范围</th><th class="ctr" style="width:18%">输入 token 范围</th><th class="ctr" style="width:12%">工具数范围</th><th>极差倍数</th></tr></thead>
+<tbody>
+<tr><td><code>rep-2</code> 商机漏斗<br><span class="small">（结构简单的单跳查询）</span></td><td class="ctr">3</td><td class="ctr">11.4s ~ 26.8s</td><td class="ctr">7,810 ~ 13,293</td><td class="ctr">1 ~ 2</td><td>耗时 <b>2.35×</b><br>token <b>1.70×</b></td></tr>
+<tr><td><code>edge-1</code> 归因类问题<br><span class="small">（能力边界外，无稳定路径）</span></td><td class="ctr">8</td><td class="ctr"><b>24.0s ~ 61.7s</b></td><td class="ctr"><b>13,569 ~ 35,162</b></td><td class="ctr"><b>4 ~ 14</b></td><td>耗时 <b>2.6×</b><br>token <b>2.6×</b></td></tr>
+</tbody>
+</table>
+
+<div class="box box-gap">
+  <span class="bt">这张表推翻了两个说法，其中一个是本册自己的</span>
+  <p><b>推翻的第一个：「跑间方差未统计」。</b>数据早就跑出来了，只是没被汇总回文档——见 §9.2 的 B-09。<b>做过而没归档的工作，在读者那里等同于没做，而成本已经付了。</b></p>
+  <p><b>推翻的第二个：§6.2.1 那张实测表可以直接当基线。</b>不能。既然同一场景的耗时能在 24s 和 62s 之间摆动，那么「P90 约 31s」这个数字本身就带着一个宽得多的不确定区间。<b>拿单次观测去卡一个 30s 的门槛，本质上是在测量噪声。</b></p>
+  <p><b>还能读出一条设计信息：方差大小与「路径是否确定」强相关。</b><code>rep-2</code> 只有一条合理路径，方差来自措辞长短；<code>edge-1</code> 没有正确路径，模型每次编排出不同的降级方案，工具数在 4 到 14 之间跳。<b>方差可以当作「这个问题是否在能力边界内」的一个客观信号</b>——不需要人来判断，跑五遍看离散度即可。这比让模型自我评估「我能不能答」可靠得多。</p>
+</div>
+
+<p><b>由此得出的门槛修正：</b>凡是涉及耗时、token、准确率的阈值判定，必须基于<b>每场景重复 5~10 次的中位数与 P90</b>，而不是单次值。这条写进了 §6.8 的第 14 项。</p>
+
+<h2 id="c6-8">6.8　Go / No-Go 上线门槛表</h2>
+
+<p>下表把前面所有「待实测」收敛成一份可执行的准出清单。<b>每一项都注明测量方法与判定阈值，没有一项依赖主观判断。</b>其中第 1 项已通过，第 3、6、8 项已有实测值但<b>均未达标</b>——这是本册唯一一处「自己的产品当前过不了自己定的门槛」的地方，如实列出。</p>
+
+<table class="tight">
+<thead><tr><th style="width:6%">序</th><th style="width:22%">门槛项</th><th style="width:22%">判定阈值</th><th style="width:22%">测量方法</th><th>阻塞级别</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>单元测试全绿</td><td>17 files / 308 tests 全通过</td><td><code>npm test</code></td><td><b>阻塞</b>（<span class="tag t-meas">已实测</span>当前 <b>308/308 通过</b>）</td></tr>
+<tr><td>2</td><td>工具选择准确率</td><td>≥ 85%（区间下界）</td><td>60 条评测集，报 Wilson CI</td><td><b>阻塞</b></td></tr>
+<tr><td>3</td><td>引用可解析率</td><td>≥ 98%（<b>区间下界</b>，非点估计）</td><td>机器判定，复用 <code>resolveRef</code>；需 ≥ 190 个独立场景</td><td><b>阻塞</b>（<span class="tag t-meas">已实测</span> 129/129，但 n=14 场景，下界仅 78.5%，<b>尚不构成通过</b>）</td></tr>
+<tr><td>4</td><td>权限边界零违规</td><td>C3 类 10 条全对</td><td>机器判定</td><td><b>阻塞</b>（安全项，不接受任何失败）</td></tr>
+<tr><td>5</td><td>空结果诚实率</td><td>100%</td><td>C6 类 6 条人工标注</td><td><b>阻塞</b></td></tr>
+<tr><td>6</td><td>确认摘要来自数据库</td><td>4/4 写工具</td><td>代码审查 + C5 类校验</td><td><b>阻塞</b>（<span class="tag t-code">代码事实</span>当前 <b>2/4</b>，G-01）</td></tr>
+<tr><td>7</td><td>写路径 scope 校验</td><td>4/4 写工具</td><td>代码审查</td><td><b>阻塞</b>（G-02）</td></tr>
+<tr><td>8</td><td>端到端耗时 P90</td><td>≤ 30s</td><td>埋点统计，≥ 100 次会话</td><td>非阻塞（<span class="tag t-meas">已实测</span> n=14 时 P90 <b>约 31s，未达标</b>；拖尾来自能力边界外的问题）</td></tr>
+<tr><td>9</td><td>单会话 token 均值</td><td>建立基线并设护栏</td><td>埋点统计</td><td>非阻塞</td></tr>
+<tr><td>10</td><td>人工基线已测</td><td>实验组 A 完成</td><td>影子测试 n≥8</td><td><b>阻塞</b>（上线后无法补测）</td></tr>
+<tr><td>11</td><td>埋点上线</td><td>§7.1 事件字典全部接入</td><td>数据校验</td><td><b>阻塞</b>（否则上线后什么都看不到）</td></tr>
+<tr><td>12</td><td>评测进 CI</td><td>每次提交自动跑</td><td>§7.2</td><td>非阻塞但强烈建议</td></tr>
+<tr><td><b>13</b></td><td><b>实测结果归档入库</b></td><td>每次回归运行的原始输出连同时间戳、模型名、代码 commit 一并提交</td><td>代码审查</td><td><b>阻塞</b>（B-07）——<b>没有归档，第 3、8 两项无法与历史对比，等于没有门槛</b></td></tr>
+<tr><td><b>14</b></td><td><b>关键场景跑间方差已测</b></td><td>核心场景各跑 5~10 遍，报中位数与 P90</td><td>§6.7.3</td><td><b>阻塞</b>——单次观测不能作为阈值判据（G-11）</td></tr>
+</tbody>
+</table>
+
+<div class="box box-gap">
+  <span class="bt">这张表里最容易被跳过的两项：第 10 和第 11</span>
+  <p><b>第 10 项（人工基线）是唯一一个「过期作废」的门槛。</b>其它任何一项都可以上线后再补，唯独人工基线不行——一旦用户用过 Agent，他的人工工作方式就已经改变，那个基线永远消失了。<b>而没有基线，这个项目将永远无法证明自己创造了价值。</b>它排在第 10 位，但应该第一个做。</p>
+  <p><b>第 11 项（埋点）是所有非阻塞项的前置条件。</b>第 8、9 两项写着「非阻塞」，但它们非阻塞的原因是「现在根本测不了」——不是因为不重要。埋点不上线，L2 全层和 L1 的一半指标都是纸面上的定义。</p>
+  <p>这两项的共同点很有意思：<b>它们都不产出任何用户可见的功能，因此在排期里永远排在最后，然后被砍掉。</b>把它们写进阻塞项，是产品经理少数几件必须硬扛的事之一。</p>
+</div>

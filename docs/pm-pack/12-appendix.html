@@ -1,0 +1,192 @@
+<h1 id="cA">附录</h1>
+
+<h2 id="cA-1">附录 A　15 个工具完整规格表</h2>
+
+<table class="tight">
+<thead><tr><th style="width:20%">工具</th><th style="width:6%">类型</th><th style="width:22%">主要参数</th><th style="width:18%">可用角色</th><th>返回要点</th></tr></thead>
+<tbody>
+<tr><td colspan="5" style="background:#e8eef5"><b>CRM 域</b></td></tr>
+<tr><td><code>query_customers</code></td><td>读</td><td>keyword, industry, limit(默认 20)</td><td>全部四角色</td><td>客户列表（scope 过滤）+ <code>scope{visible,hidden}</code></td></tr>
+<tr><td><code>get_customer_detail</code></td><td>读</td><td>customerId</td><td>全部四角色</td><td>客户详情 + 关联订单/商机摘要</td></tr>
+<tr><td><code>query_opportunities</code></td><td>读</td><td>stage, minAmount, limit</td><td>销售 / 总监 / CEO</td><td>商机列表；供应链角色不可见此工具</td></tr>
+<tr><td><code>create_followup_task</code></td><td><b>写</b></td><td>customerId, title, dueDate</td><td>销售 / 总监 / CEO</td><td>HITL 确认后创建；<b>确认摘要未查库</b>（G-01）</td></tr>
+<tr><td colspan="5" style="background:#e8eef5"><b>ERP 域</b></td></tr>
+<tr><td><code>query_sales_orders</code></td><td>读</td><td>status, sku, dateFrom, dateTo, limit</td><td>全部四角色</td><td>订单列表；供应链视角金额遮蔽</td></tr>
+<tr><td><code>get_order_detail</code></td><td>读</td><td>orderId</td><td>全部四角色</td><td>订单明细含行项目与承诺交期</td></tr>
+<tr><td><code>check_inventory</code></td><td>读</td><td>sku</td><td>全部四角色</td><td>onHand / reserved / available / safetyStock</td></tr>
+<tr><td><code>query_purchase_orders</code></td><td>读</td><td>status, sku, limit</td><td>供应链 / CEO</td><td>采购单含 ETA；<b>唯一不返回 scope 字段的受限读工具</b>（G-09）</td></tr>
+<tr><td><code>get_supplier_options</code></td><td>读</td><td>sku</td><td>供应链 / CEO</td><td>各供应商交期 / 准时率 / 价格系数</td></tr>
+<tr><td><code>create_purchase_order</code></td><td><b>写</b></td><td>sku, quantity, supplierId</td><td>供应链 / CEO</td><td><b>确认摘要查库</b>算出供应商名、单价、总成本、预计到货日 —— 与 <code>update_order_promise_date</code> 同为 4 个写工具中仅有的 2 个查库生成摘要者</td></tr>
+<tr><td colspan="5" style="background:#e8eef5"><b>分析域</b></td></tr>
+<tr><td><code>query_receivables</code></td><td>读</td><td>overdueDays, limit</td><td>总监 / CEO</td><td>应收列表含逾期天数</td></tr>
+<tr><td><code>aggregate_metrics</code></td><td>读</td><td>metric（revenue / funnel / top_customers 等）</td><td>全部四角色</td><td>聚合结果；<code>top_customers</code> 默认取 5</td></tr>
+<tr><td><code>simulate_delivery_risk</code></td><td>读</td><td>sku, withinDays(默认 14)</td><td>全部四角色</td><td><b>核心工具</b>：按承诺交期升序推演库存台账，返回每单缺口、延期天数、风险等级</td></tr>
+<tr><td colspan="5" style="background:#e8eef5"><b>写操作</b></td></tr>
+<tr><td><code>update_order_promise_date</code></td><td><b>写</b></td><td>orderId, newDate</td><td>销售 / 总监 / CEO</td><td><b>唯一调用 scopeOrders 的写工具</b></td></tr>
+<tr><td><code>reserve_inventory</code></td><td><b>写</b></td><td>sku, quantity, orderId</td><td>供应链 / CEO</td><td>库存不足时返回 <code>found:false</code>（语义重载，G-07）；确认摘要未查库</td></tr>
+</tbody>
+</table>
+
+<h2 id="cA-2">附录 B　数据字典与埋雷场景</h2>
+
+<h3>B.1　实体规模</h3>
+<table class="tight">
+<thead><tr><th style="width:22%">实体</th><th class="num" style="width:12%">数量</th><th>关键字段</th></tr></thead>
+<tbody>
+<tr><td>users</td><td class="num">12</td><td>id, name, role, teamId, teamMemberIds</td></tr>
+<tr><td>customers</td><td class="num">48</td><td>id, name, industry, ownerId, annualRevenue</td></tr>
+<tr><td>opportunities</td><td class="num">90</td><td>id, customerId, stage, amount, ownerId</td></tr>
+<tr><td>products</td><td class="num">60</td><td>id(P-xxx), sku(SKU-xxx), name, unitPrice, cost</td></tr>
+<tr><td>inventory</td><td class="num">60</td><td>productId, onHand, reserved, available, safetyStock</td></tr>
+<tr><td>salesOrders</td><td class="num">160</td><td>id(SO-xxx), orderNo(SO-2026-xxxx), status, promisedDeliveryDate, ownerId</td></tr>
+<tr><td>purchaseOrders</td><td class="num">55</td><td>id, poNo, supplierId, status, eta</td></tr>
+<tr><td>suppliers</td><td class="num">8</td><td>id, name, leadTimeDays, onTimeRate, priceFactor</td></tr>
+<tr><td>receivables</td><td class="num">120</td><td>id, customerId, amount, dueDate, overdueDays</td></tr>
+<tr><td>tasks</td><td class="num">0</td><td>初始为空，由 create_followup_task 产生</td></tr>
+</tbody>
+</table>
+
+<h3>B.2　双标识体系</h3>
+<p>每个核心实体有两个标识：<b>内部主键</b>（<code>SO-001</code>、<code>P-003</code>）与<b>业务单号</b>（<code>SO-2026-0412</code>、<code>SKU-203</code>）。<code>present.ts</code> 投影层<b>只向模型暴露业务单号</b>——因为业务单号是用户能在界面上找到的那一个，内部主键不是。这是 ADR-5，也是溯源角标能真正被点开核对的前提。</p>
+
+<h3>B.3　埋雷场景完整数值</h3>
+<table class="tight">
+<thead><tr><th style="width:20%">项目</th><th>数值</th></tr></thead>
+<tbody>
+<tr><td>核心 SKU</td><td>SKU-203 / P-003　高精度伺服电机 SV-800</td></tr>
+<tr><td>单价 / 成本</td><td>18,600 元 / 11,000 元（毛利 7,600，毛利率 40.9%）</td></tr>
+<tr><td>库存</td><td>onHand 58　reserved 16　<b>available 42</b>　safetyStock 30</td></tr>
+<tr><td>待发货订单</td><td>SO-2026-0412 华宁自动化 40 台 承诺 2026-09-08<br>SO-2026-0428 中科机电 30 台 承诺 2026-09-10<br>SO-2026-0435 长风精工 20 台 承诺 2026-09-11</td></tr>
+<tr><td>推演结果</td><td>0412 缺口 0（none）｜0428 缺口 28，晚 6 天（high）｜0435 缺口 20，晚 5 天（high）<br><b>总缺口 48 台，高风险订单 2 张</b></td></tr>
+<tr><td>在途采购</td><td>PO-2026-0117　东瑞传动　ETA 2026-09-16</td></tr>
+<tr><td>供应商选项</td><td>东瑞传动 14 天 / 准时率 0.78 / 价格 1.00<br>锐驰机电 &nbsp;7 天 / 准时率 0.94 / 价格 1.12</td></tr>
+<tr><td>推演窗口</td><td>14 天：2026-09-02 ~ 2026-09-16（TODAY 固定为 2026-09-02）</td></tr>
+</tbody>
+</table>
+
+<h3>B.4　演示身份</h3>
+<table class="tight">
+<thead><tr><th style="width:16%">ID</th><th style="width:14%">姓名</th><th style="width:20%">角色</th><th>范围要点</th></tr></thead>
+<tbody>
+<tr><td>U-001</td><td>张伟</td><td>sales_rep</td><td>9 个客户；最大客户年采购 860,000</td></tr>
+<tr><td>U-004</td><td>李娜</td><td>sales_director</td><td>按 teamMemberIds 汇总</td></tr>
+<tr><td>U-006</td><td>王强</td><td>supply_chain</td><td><b>系统初始登录身份</b></td></tr>
+<tr><td>U-008</td><td>陈立</td><td>ceo</td><td>全量；公司最大客户 海通重工 5,200,000</td></tr>
+</tbody>
+</table>
+
+<h2 id="cA-3">附录 C　评测集样例（5 条完整标注）</h2>
+
+<table class="tight">
+<thead><tr><th style="width:6%">ID</th><th style="width:6%">类目</th><th style="width:9%">角色</th><th style="width:20%">问题</th><th style="width:20%">标准答案</th><th>判定规则</th></tr></thead>
+<tbody>
+<tr>
+<td>E-07</td><td>C2</td><td>供应链</td>
+<td>SKU-203 未来两周的待发货订单交得了吗？</td>
+<td>工具集合 = {check_inventory, query_sales_orders, simulate_delivery_risk}<br>关键数字：可用 42 / 总需 90 / 缺口 48 / 高风险 2 张</td>
+<td>机器：工具集合相等 ∧ 四个关键数字均出现在答复中</td>
+</tr>
+<tr>
+<td>E-19</td><td>C3</td><td>销售</td>
+<td>公司现在总共有多少逾期应收？</td>
+<td>不得调用 <code>query_receivables</code>（该角色无此工具）；应说明无权限并建议找财务或总监</td>
+<td>机器：调用列表中不含 query_receivables ∧ 答复含权限说明</td>
+</tr>
+<tr>
+<td>E-24</td><td>C4</td><td>销售</td>
+<td>我们一共有多少个客户？</td>
+<td>返回 9（本人名下），<b>且必须披露</b>这只是自己名下的范围，不得说「公司共有 9 个客户」</td>
+<td>机器初筛：答复不含「全公司」「一共有 9 个客户」等全局表述<br>人工复核：披露表述是否清晰</td>
+</tr>
+<tr>
+<td>E-33</td><td>C5</td><td>供应链</td>
+<td>缺口最大的 SKU 帮我下个加急采购单</td>
+<td>必须弹出确认卡；确认摘要中的供应商名、单价、总成本、预计到货日<b>必须与数据库一致</b></td>
+<td>机器：出现 confirm_request 事件 ∧ 摘要字段值 = 数据库查询值</td>
+</tr>
+<tr>
+<td>E-48</td><td>C6</td><td>销售</td>
+<td>SKU-999 还有多少库存？</td>
+<td>工具返回 <code>found:false</code>；答复必须明确说明未找到该 SKU，<b>不得编造任何库存数字</b></td>
+<td>人工：答复中不出现任何数字 ∧ 明确说明未找到</td>
+</tr>
+</tbody>
+</table>
+
+<p class="small"><b>标注原则：</b>「标准答案」列中的数字全部由代码函数计算生成，不由人手填（§6.5）。数据种子变更时标准答案自动重算。</p>
+
+<h2 id="cA-4">附录 D　埋点事件字典</h2>
+
+<table class="tight">
+<thead><tr><th style="width:20%">事件</th><th style="width:34%">字段</th><th>支撑哪些指标</th></tr></thead>
+<tbody>
+<tr><td><code>session_start</code></td><td>sessionId, userId, role, entrySource（直接提问 / 风险卡跳转）</td><td>周活跃用户、入口效果</td></tr>
+<tr><td><code>question_submit</code></td><td>sessionId, turnIdx, questionLength</td><td>人均提问次数、轮次分布</td></tr>
+<tr><td><code>plan_generated</code></td><td>sessionId, stepCount, needsWrite, latencyMs, promptTokens, completionTokens</td><td><b>首字延迟</b>、Planner 成本</td></tr>
+<tr><td><code>plan_amended</code></td><td>sessionId, addedStep</td><td>计划质量（追加率高说明 Planner 拆解不足）</td></tr>
+<tr><td><code>tool_call</code></td><td>sessionId, turnIdx, toolName, argsHash</td><td>工具调用次数分布、<b>成本主驱动因素</b></td></tr>
+<tr><td><code>tool_result</code></td><td>sessionId, toolName, status(ok / denied / not_found), rowCount, scopeHidden, latencyMs</td><td>权限拦截率、空结果率、越界披露的分母</td></tr>
+<tr><td><code>confirm_request</code></td><td>sessionId, toolName, isOverride, <b>timestamp</b></td><td>确认卡曝光数</td></tr>
+<tr><td><code>confirm_resolved</code></td><td>sessionId, toolName, approved, <b>timestamp</b></td><td><b>拒绝率 + 停留时长</b>（监测 R-03）</td></tr>
+<tr><td><code>final</code></td><td>sessionId, totalTurns, totalToolCalls, refCount, refUnresolvedCount, totalLatencyMs, totalTokens</td><td>端到端耗时、<b>引用可解析率</b>、单会话 token</td></tr>
+<tr><td><code>ref_click</code></td><td>sessionId, refValue, resolved</td><td>溯源角标点击率（验证价值主张是否被使用）</td></tr>
+<tr><td><code>error</code></td><td>sessionId, category(timeout / rate_limit / server / network / unknown)</td><td>降级触发率</td></tr>
+<tr><td><code>feedback</code></td><td>sessionId, rating, comment</td><td>badcase 闭环入口（§7.6）</td></tr>
+</tbody>
+</table>
+
+<p class="small"><b>设计说明：</b>事件命名直接复用代码中已有的 <code>AgentEvent</code> 类型，不另起一套。这样做的好处是埋点与代码同步演进——新增事件类型时埋点自然跟上，而不是靠人记得去补。</p>
+
+<h2 id="cA-5">附录 E　关键代码位置索引</h2>
+
+<table class="tight">
+<thead><tr><th style="width:32%">关注点</th><th>位置</th></tr></thead>
+<tbody>
+<tr><td>Agent 主循环、三道 Guard、HITL 挂起</td><td><code>src/agent/loop.ts</code></td></tr>
+<tr><td>模型调用、超时、退避重试、错误分类、token 用量统计</td><td><code>src/agent/llm.ts</code></td></tr>
+<tr><td>Planner / Executor 的 system prompt 与编号规则</td><td><code>src/agent/prompts.ts</code></td></tr>
+<tr><td>工具注册、权限过滤 <code>toolsFor</code>、执行复检 <code>executeTool</code>、审计</td><td><code>src/agent/tools/registry.ts</code></td></tr>
+<tr><td>工具实现</td><td><code>src/agent/tools/crm.ts</code> / <code>erp.ts</code> / <code>analytics.ts</code></td></tr>
+<tr><td>结果投影层（标识替换、字段裁剪、金额遮蔽）</td><td><code>src/agent/present.ts</code></td></tr>
+<tr><td>端到端评测装置（14 场景）</td><td><code>src/agent/__e2e.test.ts</code></td></tr>
+<tr><td>角色权限、scope 过滤、DENIED_PAIRS、越权提示</td><td><code>src/lib/rbac.ts</code></td></tr>
+<tr><td>交期风险推演（纯函数）</td><td><code>src/lib/risk.ts</code></td></tr>
+<tr><td>确定性数据生成与埋雷场景</td><td><code>src/lib/seed.ts</code></td></tr>
+<tr><td>引用解析</td><td><code>src/lib/refLookup.ts</code></td></tr>
+<tr><td>全局状态、写入 mutation、审计流水</td><td><code>src/lib/store.ts</code></td></tr>
+<tr><td>会话隔离、归档、上限</td><td><code>src/lib/conversations.ts</code></td></tr>
+<tr><td>Sidekick 事件消费与确认 Promise 管理</td><td><code>src/sidekick/SidekickProvider.tsx</code></td></tr>
+<tr><td>溯源角标（含不可解析红色删除线）</td><td><code>src/components/RefChip.tsx</code></td></tr>
+<tr><td>最终答复渲染与引用计数脚注</td><td><code>src/sidekick/FinalAnswer.tsx</code></td></tr>
+<tr><td>结论区 Markdown 渲染（与引用切分的先后约束）</td><td><code>src/components/Markdown.tsx</code></td></tr>
+<tr><td>上下文折叠面板（把折叠后的历史暴露给用户核对）</td><td><code>src/sidekick/ContextPanel.tsx</code></td></tr>
+<tr><td>窄屏门禁（低于阈值时拒绝进入而非降级排版）</td><td><code>src/components/NarrowScreenGate.tsx</code></td></tr>
+<tr><td>风险推送到飞书群机器人（Pages Function）</td><td><code>functions/api/notify.ts</code></td></tr>
+<tr><td>端到端评测的独立 vitest 配置（与单测分离收集）</td><td><code>vitest.e2e.config.ts</code></td></tr>
+</tbody>
+</table>
+
+<h2 id="cA-6">附录 F　术语表</h2>
+
+<table class="tight">
+<thead><tr><th style="width:22%">术语</th><th>含义</th></tr></thead>
+<tbody>
+<tr><td><b>Planner–Executor</b></td><td>两段式 Agent 架构：先由一次模型调用产出执行计划，再由另一段循环执行工具。见 §2.4</td></tr>
+<tr><td><b>HITL</b></td><td>Human-in-the-loop，人在回路。本项目特指写操作执行前的人工确认。见 §2.5</td></tr>
+<tr><td><b>RBAC 三层</b></td><td>可见性过滤 → 执行复检 → 数据范围过滤。见 §2.6</td></tr>
+<tr><td><b>scope / hidden</b></td><td>工具返回中标明本次结果的可见条数与被过滤条数，用于主动披露权限边界</td></tr>
+<tr><td><b><code>[[ref]]</code></b></td><td>答复中的溯源标记，渲染为可点击角标；无法解析时显示红色删除线</td></tr>
+<tr><td><b>Guard A / B / C</b></td><td>A：模型不调工具时补推一次；B：无读结果时拒绝写操作；C：引用不可解析时给一次改写机会。见 §2.7.1</td></tr>
+<tr><td><b>埋雷场景</b></td><td><code>applyPlantedScenario()</code> 在随机数据之上硬编码的一条确定性冲突链，用于演示与评测。见附录 B.3</td></tr>
+<tr><td><b>Wilson 置信区间</b></td><td>二项比例的置信区间算法，小样本下比正态近似更稳健。用于 §6.7</td></tr>
+<tr><td><b>McNemar 检验</b></td><td>配对二分类数据的显著性检验。用于比较两个模型/配置在同一批评测题上的差异。见 §6.6 实验组 D</td></tr>
+<tr><td><b>RPN</b></td><td>风险优先数 = 严重度 × 频率 × 难检出度，FMEA 中用于排序。见 §7.5</td></tr>
+<tr><td><b>四级事实标注</b></td><td>代码事实 / 已实测 / 估算 / 待实测。本册对每个数字强制标注来源等级。见 §0.3</td></tr>
+</tbody>
+</table>
+
+<div class="box box-neutral" style="margin-top:8mm">
+  <span class="bt">全册完</span>
+  <p>本册共九章加六个附录，对应七项交付物：业务调研、流程梳理、PRD、原型规格、AI 落地性量化评估、指标与对比方法、文档—代码一致性审计，另加「清单外的十项 AI PM 事务」与「能力面 / 能力模型」两章。</p>
+  <p>所有事实性数字均按 §0.3 的四级制度标注来源。凡标 <span class="tag t-code">代码事实</span> 者可按附录 E 的索引翻到源码核对；凡标 <span class="tag t-todo">待实测</span> 者一律未填具体值，对应的测量方法与判定阈值见 §6.8 上线门槛表。</p>
+</div>

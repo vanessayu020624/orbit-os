@@ -1,0 +1,226 @@
+<h1 id="c5">第 5 章　AI 方案落地性评估</h1>
+
+<p class="lead">这一章回答「能不能落地」。做法是先建一个可打分的判据框架，用它把系统里 18 个原子任务逐个分流，再看技术、成本、风险三条线，最后给出一张成熟度评分卡——诚实地说明现在距离生产可用还差什么。</p>
+
+<h2 id="c5-1">5.1　评估框架：五维判据与打分规则</h2>
+
+<p>「这个任务该不该交给大模型」不能靠感觉。本册用五个维度打分，每维 1~5 分：</p>
+
+<table>
+<thead><tr><th style="width:12%">维度</th><th style="width:26%">问什么</th><th style="width:26%">1 分（不适合模型）</th><th>5 分（适合模型）</th></tr></thead>
+<tbody>
+<tr><td><b>D1 确定性</b></td><td>这件事有唯一正确答案吗？</td><td>有，且可由规则精确计算</td><td>没有，依赖语境与表达</td></tr>
+<tr><td><b>D2 错误可检出性</b></td><td>如果做错了，用户能发现吗？</td><td>发现不了（错误看起来很正常）</td><td>一眼就能看出</td></tr>
+<tr><td><b>D3 错误代价</b></td><td>做错一次的后果多大？</td><td>不可逆 / 涉及资金或承诺</td><td>可逆 / 仅影响体验</td></tr>
+<tr><td><b>D4 输入模糊度</b></td><td>输入是结构化的还是自然语言？</td><td>完全结构化</td><td>自然语言、含指代与省略</td></tr>
+<tr><td><b>D5 长尾程度</b></td><td>需求是可枚举的还是长尾的？</td><td>可枚举，做几个页面就覆盖了</td><td>长尾，无法预先定义</td></tr>
+</tbody>
+</table>
+
+<h3>判定规则</h3>
+
+<table class="tight">
+<thead><tr><th style="width:16%">总分</th><th style="width:22%">归属</th><th>处理方式</th></tr></thead>
+<tbody>
+<tr><td>≥ 18</td><td><b>模型主导</b></td><td>交给 LLM，代码只做校验</td></tr>
+<tr><td>12 ~ 17</td><td><b>模型 + 代码兜底</b></td><td>LLM 产出，代码强制校验或人工确认</td></tr>
+<tr><td>≤ 11</td><td><b>代码主导</b></td><td>写成确定性函数，模型只负责调用与转述</td></tr>
+<tr><td colspan="3"><b>一票否决</b>：D3 ≤ 2（错误代价高）且 D2 ≤ 2（错误难发现）→ 无论总分多少，一律降为代码主导或强制 HITL</td></tr>
+</tbody>
+</table>
+
+<div class="box box-key">
+  <span class="bt">为什么设「一票否决」这条规则</span>
+  <p>因为 D2 和 D3 相乘才是真实风险。<b>一个错了但看得出来的高代价操作是可控的</b>（用户会拦下来）；<b>一个错了看不出来的高代价操作是灾难</b>——它会被当成正确答案一路传导到决策里。</p>
+  <p>本项目的交期风险计算正是这个组合：算错了后果严重（错误的交付承诺），而且算错了完全看不出来（模型会输出一段格式工整、语气笃定的错误分析）。所以无论它在 D4/D5 上得分多高，都必须落到代码里。这条规则把「凭直觉觉得该写死」变成了可复用的判据。</p>
+</div>
+
+<h2 id="c5-2">5.2　任务级判定：18 个原子任务该交给谁</h2>
+
+<table class="tight">
+<thead><tr><th style="width:5%">#</th><th style="width:22%">原子任务</th><th class="ctr" style="width:5%">D1</th><th class="ctr" style="width:5%">D2</th><th class="ctr" style="width:5%">D3</th><th class="ctr" style="width:5%">D4</th><th class="ctr" style="width:5%">D5</th><th class="ctr" style="width:6%">总分</th><th style="width:14%">判定</th><th>实际实现</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>理解用户的自然语言问题</td><td class="ctr">5</td><td class="ctr">4</td><td class="ctr">4</td><td class="ctr">5</td><td class="ctr">5</td><td class="ctr"><b>23</b></td><td>模型主导</td><td>Planner</td></tr>
+<tr><td>2</td><td>把问题拆成执行步骤</td><td class="ctr">4</td><td class="ctr">5</td><td class="ctr">4</td><td class="ctr">5</td><td class="ctr">5</td><td class="ctr"><b>23</b></td><td>模型主导</td><td>Planner，计划渲染给用户即 D2 的保障</td></tr>
+<tr><td>3</td><td>选择该调用哪个工具</td><td class="ctr">3</td><td class="ctr">4</td><td class="ctr">3</td><td class="ctr">5</td><td class="ctr">5</td><td class="ctr"><b>20</b></td><td>模型主导</td><td>Executor；工具调用卡可见</td></tr>
+<tr><td>4</td><td>填写工具参数</td><td class="ctr">2</td><td class="ctr">3</td><td class="ctr">3</td><td class="ctr">4</td><td class="ctr">4</td><td class="ctr"><b>16</b></td><td>模型+兜底</td><td>schema 强约束 + 写操作 HITL</td></tr>
+<tr><td>5</td><td>把结果讲成人话</td><td class="ctr">5</td><td class="ctr">5</td><td class="ctr">4</td><td class="ctr">4</td><td class="ctr">5</td><td class="ctr"><b>23</b></td><td>模型主导</td><td>Executor</td></tr>
+<tr><td>6</td><td>判断信息是否够、要不要追加步骤</td><td class="ctr">4</td><td class="ctr">4</td><td class="ctr">4</td><td class="ctr">4</td><td class="ctr">4</td><td class="ctr"><b>20</b></td><td>模型主导</td><td><code>plan_amended</code></td></tr>
+<tr><td>7</td><td>识别问题超出业务范围</td><td class="ctr">4</td><td class="ctr">5</td><td class="ctr">5</td><td class="ctr">5</td><td class="ctr">4</td><td class="ctr"><b>23</b></td><td>模型主导</td><td>空 steps 短路</td></tr>
+<tr><td>8</td><td>解析多轮对话中的指代</td><td class="ctr">4</td><td class="ctr">3</td><td class="ctr">4</td><td class="ctr">5</td><td class="ctr">4</td><td class="ctr"><b>20</b></td><td>模型主导</td><td>历史 6 轮 + 摘要</td></tr>
+<tr><td colspan="10" style="background:#e8eef5"><b>—— 以下为代码主导 ——</b></td></tr>
+<tr><td>9</td><td><b>库存台账时间轴推演</b></td><td class="ctr">1</td><td class="ctr">1</td><td class="ctr">1</td><td class="ctr">1</td><td class="ctr">2</td><td class="ctr"><b>6</b></td><td>代码主导<br><span class="small">+ 一票否决</span></td><td><code>risk.ts</code> 纯函数</td></tr>
+<tr><td>10</td><td>缺口数量与延期天数计算</td><td class="ctr">1</td><td class="ctr">1</td><td class="ctr">1</td><td class="ctr">1</td><td class="ctr">1</td><td class="ctr"><b>5</b></td><td>代码主导</td><td>同上</td></tr>
+<tr><td>11</td><td>风险等级判定（high/medium/none）</td><td class="ctr">2</td><td class="ctr">2</td><td class="ctr">2</td><td class="ctr">1</td><td class="ctr">2</td><td class="ctr"><b>9</b></td><td>代码主导</td><td>同上</td></tr>
+<tr><td>12</td><td>金额聚合与 KPI 计算</td><td class="ctr">1</td><td class="ctr">1</td><td class="ctr">2</td><td class="ctr">1</td><td class="ctr">2</td><td class="ctr"><b>7</b></td><td>代码主导</td><td><code>aggregate_metrics</code></td></tr>
+<tr><td>13</td><td><b>权限判定（能否调用/能看几行）</b></td><td class="ctr">1</td><td class="ctr">2</td><td class="ctr">1</td><td class="ctr">1</td><td class="ctr">1</td><td class="ctr"><b>6</b></td><td>代码主导<br><span class="small">+ 一票否决</span></td><td>三层 RBAC</td></tr>
+<tr><td>14</td><td>数据范围过滤</td><td class="ctr">1</td><td class="ctr">1</td><td class="ctr">1</td><td class="ctr">1</td><td class="ctr">1</td><td class="ctr"><b>5</b></td><td>代码主导</td><td><code>scope*</code></td></tr>
+<tr><td>15</td><td>敏感字段遮蔽</td><td class="ctr">1</td><td class="ctr">2</td><td class="ctr">1</td><td class="ctr">1</td><td class="ctr">1</td><td class="ctr"><b>6</b></td><td>代码主导</td><td><code>present.ts</code></td></tr>
+<tr><td>16</td><td><b>写操作确认摘要生成</b></td><td class="ctr">2</td><td class="ctr">1</td><td class="ctr">1</td><td class="ctr">2</td><td class="ctr">2</td><td class="ctr"><b>8</b></td><td>代码主导<br><span class="small">+ 一票否决</span></td><td><code>confirmSummary</code>（仅 2/4 查库，G-01）</td></tr>
+<tr><td>17</td><td>引用可解析性校验</td><td class="ctr">1</td><td class="ctr">3</td><td class="ctr">2</td><td class="ctr">1</td><td class="ctr">1</td><td class="ctr"><b>8</b></td><td>代码主导</td><td><code>resolveRef</code> + Guard C</td></tr>
+<tr><td>18</td><td>审计留痕</td><td class="ctr">1</td><td class="ctr">1</td><td class="ctr">1</td><td class="ctr">1</td><td class="ctr">1</td><td class="ctr"><b>5</b></td><td>代码主导</td><td><code>pushAudit</code></td></tr>
+</tbody>
+</table>
+
+<h2 id="c5-3">5.3　判定结果与「模型只做判断、代码只做规则」</h2>
+
+<table class="tight">
+<thead><tr><th style="width:22%">归属</th><th class="ctr" style="width:12%">任务数</th><th>共同特征</th></tr></thead>
+<tbody>
+<tr><td>模型主导</td><td class="ctr">7</td><td>全部是<b>理解、组织、表达</b>类：把模糊的输入变清晰，把结构化的输出变自然</td></tr>
+<tr><td>模型 + 代码兜底</td><td class="ctr">1</td><td>参数填写——处在交界处，因此用 schema 约束 + HITL 双保险</td></tr>
+<tr><td>代码主导</td><td class="ctr">10</td><td>全部是<b>计算、判定、留痕</b>类：有唯一正确答案，错了不易被发现</td></tr>
+</tbody>
+</table>
+
+<div class="box box-key">
+  <span class="bt">这张表的分界线其实非常干净</span>
+  <p>18 个任务的分界不在「难/易」，而在<b>「有没有唯一正确答案」</b>。</p>
+  <p>模型拿到的 7 项，没有一项存在标准答案——「这个问题该拆成几步」有很多种合理拆法，「怎么讲给用户听」也没有唯一写法。代码拿到的 10 项，每一项都有且只有一个正确结果——缺口就是 48 台，不多不少。</p>
+  <p><b>把有标准答案的事交给概率模型，是在用不确定性去解决一个本来确定的问题。</b>这是我在这个项目里最核心的一条判断，也是第 2 章断点归因、第 3 章工具边界、第 6 章指标设计共同的底层依据。</p>
+</div>
+
+<h3>这条分界带来的一个可验证的推论</h3>
+
+<p>如果分工正确，那么<b>更换模型不应该影响任何数值结果</b>——因为数值全部来自代码。本项目在开发过程中确实做了一次模型更换（GLM-4.5-Flash → qwen-plus），并跑了 9 个场景的能力边界回归<span class="tag t-meas">已实测 n=9</span>：数值结论完全一致，变化的只有表达风格与延迟。</p>
+
+<p>这是一次意料之外的架构验证：<b>模型可替换性本身就是分工正确的证据。</b>如果换模型导致缺口从 48 变成了 50，那说明有计算漏到了模型侧。</p>
+
+<h2 id="c5-4">5.4　技术可行性：已被验证的与仍是赌注的</h2>
+
+<h3>5.4.1　已被验证的（有实测支撑）</h3>
+
+<table>
+<thead><tr><th style="width:26%">结论</th><th style="width:16%">证据等级</th><th>数据</th></tr></thead>
+<tbody>
+<tr><td>关闭思维链能大幅降低延迟与输出成本</td><td><span class="tag t-meas">已实测</span></td><td>GLM-4.5-Flash 关闭 thinking 前后：耗时 <b>26s → 6.4s</b>，输出 token <b>489 → 34</b><br><span class="small">样本量小（n=1 场景），但幅度足够大，方向可信</span></td></tr>
+<tr><td>模型选择对首字延迟影响显著</td><td><span class="tag t-meas">已实测</span></td><td>首字延迟：qwen-plus <b>0.42s</b> vs qwen3.7-plus <b>2.44s</b>（约 5.8 倍）<br><span class="small">n=1，需扩大样本</span></td></tr>
+<tr><td>数值结论与模型无关</td><td><span class="tag t-meas">已实测</span></td><td>换模型后 9 场景能力边界回归，数值结论一致</td></tr>
+<tr><td>三层 RBAC 有效</td><td><span class="tag t-code">代码事实</span></td><td>308 条单元测试中含权限用例；伪造越权调用被第 2 层拦截</td></tr>
+<tr><td>数据层完全可复现</td><td><span class="tag t-code">代码事实</span></td><td>固定种子 42 + 固定 TODAY，任意机器重跑结果一致</td></tr>
+</tbody>
+</table>
+
+<h3>5.4.2　仍是赌注的（无数据支撑）</h3>
+
+<table>
+<thead><tr><th style="width:26%">假设</th><th style="width:26%">赌错了会怎样</th><th>验证方法</th></tr></thead>
+<tbody>
+<tr><td>模型能稳定选对工具</td><td>整条链路失效——工具选错，后面全错</td><td>§6.5 离线评测集 60 条，测<b>工具选择准确率</b>。这是最上游、最该先测的指标</td></tr>
+<tr><td>模型不会编造 <code>[[ref]]</code></td><td>溯源机制失效，用户信任崩塌</td><td>§6.2「引用可解析率」；Guard C 已提供一次自纠机会，需测自纠成功率</td></tr>
+<tr><td>模型会遵守 scope 披露规则</td><td>用户把切片当全局，做出错误的全局判断</td><td>§6.5 中专设「越界披露」类目，人工标注</td></tr>
+<tr><td>用户会认真读确认卡而不是盲目点批准</td><td>HITL 退化成一次多余的点击，写操作实际无人把关</td><td>§6.3 埋点「确认卡停留时长」与「拒绝率」。<b>拒绝率长期为 0 是一个危险信号</b></td></tr>
+<tr><td>真实 ERP 数据下准确率不会崩</td><td>Demo 好看、上线报废</td><td>V2 准出条件：真实数据下 L1 不低于模拟数据的 90%（§3.8）</td></tr>
+</tbody>
+</table>
+
+<div class="box box-warn">
+  <span class="bt">第四条赌注最值得单独讲</span>
+  <p>「用户会认真读确认卡」是所有 HITL 设计共同的隐含假设，也是最少被检验的一条。现实是：<b>如果 Agent 的建议 20 次里有 19 次是对的，人就会开始闭眼点批准。</b>此时 HITL 在流程图上还在，在实质上已经消失了。</p>
+  <p>这意味着 HITL 不能只当作安全兜底，它需要被<b>持续监测</b>：确认卡停留时长如果收敛到 1 秒以内、拒绝率如果连续数周为 0，说明这道防线已经名存实亡，应当反过来减少弹卡频率（只对高风险操作弹）来恢复它的信号强度。<b>一个从不被拒绝的确认，等价于没有确认。</b></p>
+</div>
+
+<h2 id="c5-5">5.5　成本模型与单位经济性（敏感性矩阵）</h2>
+
+<p>我不知道当前 API 的实际单价，因此这一节<b>不给绝对金额</b>，只给参数化公式与敏感矩阵。这与 §1.5 是同一处理原则。</p>
+
+<div class="box box-ok">
+  <span class="bt">这一节的相对系数现在有实测锚点了</span>
+  <p>本节的敏感性矩阵原本全部是推演。<span class="tag t-meas">已实测</span>的 14 条端到端回归（§6.2.1）给出了真实分布：单会话总 token <b>中位 9,024</b>，区间 <b>1,404 ~ 37,605</b>，<b>倍差 26.8×</b>。</p>
+  <p>这个倍差验证了下面矩阵的核心判断：<b>成本的方差几乎全部来自工具调用次数</b>。最便宜的一次（<code>edge-2</code>，1,404 token）只有 Planner 一次调用、0 次工具；最贵的一次（<code>ceo-3</code>，37,605 token / 26 个事件）在一轮会话里连续取数并下了一张加急采购单。输入 token 占总量的 <b>94.4%</b>（172,311 / 182,501），与「主要成本项是 Executor 的输入」这一结论一致。</p>
+  <p><b>但矩阵里的具体系数（2.5×、7×、1.3×）仍是推演，未被逐项验证</b>——要验证它们需要控制变量地重跑同一问题并只改一个参数，这属于 §6.6 的对照实验设计，尚未执行。</p>
+</div>
+
+<h3>5.5.1　单次会话的 token 构成</h3>
+
+<pre>单次会话 token
+  = Planner 输入（system + 工具清单 + 历史 + 问题）
+  + Planner 输出（计划 JSON，jsonMode 下通常很短）
+  + Σ Executor 输入（system + 计划 + 工具 schema + 累积的工具结果）   ← 主要成本
+  + Σ Executor 输出（tool_calls 或最终答复）
+
+主要成本项是 Executor 的<b>输入</b>：每多调一次工具，之前所有工具结果都要
+随下一轮请求再发一遍 —— 成本随工具调用次数<b>二次增长</b>，不是线性。</pre>
+
+<h3>5.5.2　代码里已有的四道成本控制</h3>
+
+<table class="tight">
+<thead><tr><th style="width:30%">机制</th><th style="width:20%">取值</th><th>作用</th></tr></thead>
+<tbody>
+<tr><td>历史轮数限制</td><td>最近 6 轮原文</td><td>控制 Planner 与 Executor 的输入基线（<code>summarize.ts:14</code>）</td></tr>
+<tr><td>更早轮次折叠</td><td>摘要 ≤ 300 字</td><td>历史不再线性增长，而是收敛到常数上界（<code>summarize.ts:17</code>）</td></tr>
+<tr><td>工具可见性过滤</td><td>9 / 11 / 10 / 15</td><td>销售角色的工具 schema 比 CEO 少 6 个，输入直接变小</td></tr>
+<tr><td>投影层裁剪</td><td><code>present.ts</code></td><td>工具结果只暴露必要字段，不透传完整实体</td></tr>
+<tr><td>轮数上限</td><td>MAX_TURNS 12</td><td>成本硬上限</td></tr>
+</tbody>
+</table>
+
+<h3>5.5.3　敏感性矩阵：单次会话成本对什么最敏感</h3>
+
+<p>设单次会话的相对成本为 1.0（基准：2 次工具调用、无历史）。变动各参数后的相对成本：</p>
+
+<table class="tight">
+<thead><tr><th style="width:26%">变动</th><th class="ctr" style="width:16%">相对成本</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>基准（2 次工具调用）</td><td class="ctr">1.00</td><td>—</td></tr>
+<tr><td>工具调用 2 → 4 次</td><td class="ctr">约 2.5×</td><td><b>最敏感项</b>。因结果累积回灌，增长快于线性</td></tr>
+<tr><td>工具调用 2 → 8 次</td><td class="ctr">约 7×</td><td>接近 MAX_TURNS 一半时成本已失控</td></tr>
+<tr><td>带 6 轮历史 + 摘要</td><td class="ctr">约 1.3×</td><td>Planner 与 Executor 各带一份；折叠使其不随会话长度继续增长</td></tr>
+<tr><td>摘要上限 300 → 1000 字</td><td class="ctr">约 1.6×</td><td>折叠阈值的收益明显</td></tr>
+<tr><td>CEO 角色（15 工具 schema）vs 销售（9 个）</td><td class="ctr">约 1.15×</td><td>影响小于预期，因 schema 只占输入一小部分</td></tr>
+<tr><td>Guard A 触发（多一轮补推）</td><td class="ctr">约 1.5×</td><td>这就是「只补推一次」的成本理由</td></tr>
+</tbody>
+</table>
+<p class="src">相对倍数由 token 构成公式推算，非实测。绝对值需按 §7.7 的埋点上线后测量。</p>
+
+<div class="box box-key">
+  <span class="bt">这张表最重要的一行是第二行</span>
+  <p><b>工具调用次数是成本的第一驱动因素，而且是超线性的。</b>这直接反推出一条产品设计原则：<b>与其优化 prompt 长度，不如减少工具调用次数。</b></p>
+  <p>而减少调用次数最有效的手段，恰恰是 §3.5.2 的判据 ①——<b>一个工具直接回答一个业务问题</b>。<code>simulate_delivery_risk</code> 把原本需要 3~5 次调用才能凑出的推演压缩成 1 次，它同时改善了三件事：正确性（不让模型算术）、延迟、以及成本。</p>
+  <p>这是本项目里少见的「三赢」设计点。值得记下的方法论是：<b>在 Agent 产品里，工具粒度的设计同时是正确性设计、性能设计和成本设计。</b></p>
+</div>
+
+<h2 id="c5-6">5.6　落地风险登记册</h2>
+
+<table>
+<thead><tr><th style="width:6%">编号</th><th style="width:20%">风险</th><th class="ctr" style="width:8%">可能性</th><th class="ctr" style="width:8%">影响</th><th style="width:26%">缓解措施</th><th>触发预警的信号</th></tr></thead>
+<tbody>
+<tr><td>R-01</td><td>模型选错工具导致答非所问</td><td class="ctr">中</td><td class="ctr">高</td><td>工具描述精修；离线评测集回归；计划渲染给用户可见</td><td>工具选择准确率跌破门槛</td></tr>
+<tr><td>R-02</td><td>模型编造数字或引用</td><td class="ctr">中</td><td class="ctr">极高</td><td>五道防线：强制取数 + <code>[[ref]]</code> 校验 + Guard C + 红色删除线 + 写操作 HITL</td><td>引用不可解析率上升</td></tr>
+<tr><td>R-03</td><td>HITL 退化为盲目点批准</td><td class="ctr"><b>高</b></td><td class="ctr">高</td><td>监测停留时长与拒绝率；必要时收窄弹卡范围</td><td>确认卡停留时长中位数 &lt; 2s，或拒绝率连续 4 周为 0</td></tr>
+<tr><td>R-04</td><td>越权数据经历史上下文泄漏</td><td class="ctr">低</td><td class="ctr">极高</td><td>会话按角色分桶；<code>shouldRecordTurn</code> 丢弃跨角色回合</td><td>安全测试用例失败</td></tr>
+<tr><td>R-05</td><td>写操作绕过 scope 校验</td><td class="ctr">低</td><td class="ctr">高</td><td>当前依赖隐式约束（G-02），需补显式校验</td><td>—（当前无法检测，这本身就是问题）</td></tr>
+<tr><td>R-06</td><td>成本随使用量失控</td><td class="ctr">中</td><td class="ctr">中</td><td>MAX_TURNS 上限；工具粒度优化；§7.7 预算护栏</td><td>单会话平均工具调用次数上升</td></tr>
+<tr><td>R-07</td><td>模型供应商变更 / 涨价 / 下线</td><td class="ctr">中</td><td class="ctr">中</td><td>OpenAI 兼容接口，已验证可换模型且数值结论不变</td><td>供应商公告</td></tr>
+<tr><td>R-08</td><td>真实数据脏乱导致准确率崩塌</td><td class="ctr"><b>高</b></td><td class="ctr">高</td><td>V2 准出条件设为「不低于模拟数据的 90%」</td><td>接入试点期的准确率对比</td></tr>
+<tr><td>R-09</td><td>用户不用（触发门槛仍然太高）</td><td class="ctr">中</td><td class="ctr">高</td><td>风险卡上的「问 Sidekick →」入口；V1.5 主动推送</td><td>周活跃提问用户数不增长</td></tr>
+<tr><td>R-10</td><td>长时间无响应（无全局超时）</td><td class="ctr">低</td><td class="ctr">中</td><td>G-05：增加 90s 全局墙钟</td><td>P99 端到端耗时</td></tr>
+</tbody>
+</table>
+
+<p><b>R-03 和 R-08 是唯二被评为「高可能性」的风险</b>，且两者都不是技术问题——一个是人的行为惯性，一个是真实世界的数据质量。这符合我对企业 AI 项目的判断：<b>做不成的原因通常不在模型能力，而在人的使用方式和数据的真实状况。</b></p>
+
+<h2 id="c5-7">5.7　当前成熟度评分卡：距离生产可用还差什么</h2>
+
+<table>
+<thead><tr><th style="width:20%">维度</th><th class="ctr" style="width:12%">当前</th><th class="ctr" style="width:12%">生产门槛</th><th>差距与补法</th></tr></thead>
+<tbody>
+<tr><td>功能完整性</td><td class="ctr">4 / 5</td><td class="ctr">4</td><td><b>达标。</b>24 条 FR 中 22 条完整实现，2 条部分实现</td></tr>
+<tr><td>权限与安全</td><td class="ctr">3.5 / 5</td><td class="ctr">5</td><td>读路径完整；写路径 scope 覆盖 1/4（G-02）、遮蔽逻辑双实现（G-10）</td></tr>
+<tr><td>可信度机制</td><td class="ctr">4 / 5</td><td class="ctr">4.5</td><td>五道防线齐备；缺 G-01（确认摘要 2/4 未查库）</td></tr>
+<tr><td>可观测性</td><td class="ctr"><b>1 / 5</b></td><td class="ctr">4</td><td><b>最大短板。</b>无任何埋点，线上指标全部无法计算。见 §7.1 事件字典</td></tr>
+<tr><td>评测体系</td><td class="ctr"><b>1.5 / 5</b></td><td class="ctr">4</td><td>已有 14 条端到端回归并跑出实测值（§6.2.1），但只跑过一遍、原始输出未入库（B-07）、不进 CI；30 条离线评测集仍未执行。见 §6.5、§7.2</td></tr>
+<tr><td>工程质量</td><td class="ctr"><b>3.5 / 5</b></td><td class="ctr">4.5</td><td>308 条测试全绿，但确定性与非确定性测试曾被同一命令收集（§9.3.1）；回归无跑间方差统计、不进 CI（G-11）。见 §9.3</td></tr>
+<tr><td>成本可控性</td><td class="ctr">2.5 / 5</td><td class="ctr">4</td><td>已有 14 条实测 token 数据（中位 9,024），但无预算护栏、无按角色成本归因。见 §7.7</td></tr>
+<tr><td>文档一致性</td><td class="ctr"><b>2 / 5</b></td><td class="ctr">4</td><td>12 项文档—代码冲突。本册第 9 章即为修复起点</td></tr>
+<tr><td colspan="4" style="background:#f0f4f8"><b>综合：2.9 / 5　　结论：Demo 成熟，生产未就绪</b></td></tr>
+</tbody>
+</table>
+
+<div class="box box-gap">
+  <span class="bt">Go / No-Go 结论</span>
+  <p><b>结论：架构 Go，上线 No-Go。</b></p>
+  <p><b>Go 的部分：</b>模型/代码的分工判断已被验证（换模型数值不变），权限与可信度的核心机制已实现，架构上没有需要推倒重来的地方。这是最贵的部分，它已经过关了。</p>
+  <p><b>No-Go 的部分：</b>三块短板都在「知道自己做得怎么样」这一层——<b>没有埋点（不知道线上表现）、没跑评测（不知道模型准确率）、测试红着（不知道改动有没有破坏功能）</b>。这三件事的共同点是：它们不增加任何功能，但没有它们就无法判断系统是否在正常工作。</p>
+  <p><b>上线前必须做的三件事，按顺序：</b>① 把实测原始输出归档入库、每场景重复 5~10 次并进 CI（B-07、G-11、§6.7.3）；② 埋点上线，让 L1/L2 指标可计算（§7.1）；③ 补齐 G-01/G-02 两个 P0/P1 缺口。做完这三件，成熟度可达 4.0，具备灰度上线条件。</p>
+</div>

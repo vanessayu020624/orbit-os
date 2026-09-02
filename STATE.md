@@ -173,7 +173,7 @@
 
 ### 新增
 
-- `src/agent/clarify.ts` + 测试（32 条）——澄清闸。两层：确定性规则预检（零模型开销）+ 规划器语义判定。
+- `src/agent/clarify.ts` + 测试（33 条）——澄清闸。两层：确定性规则预检（零模型开销）+ 规划器语义判定。
 - `src/sidekick/ClarifyCard.tsx`——三态卡（待选 / 已选 / 已按兜底继续）。
 - `src/sidekick/ItemView.tsx`——把对话项渲染从 `Sidekick.tsx` 抽出来，桌面与移动共用同一批卡片。
 - `src/lib/viewport.ts` + 测试（4 条）——`pickShell(width,bypassed)` 三档分发：mobile / gate / desktop。
@@ -209,5 +209,5 @@
 
 ### 验收
 
-`npm run build` 0 错误；`npm test` **24 文件 392 用例全绿**（基线 20/340）；
+`npm run build` 0 错误；`npm test` **24 文件 393 用例全绿**（基线 20/340）；
 `npm run lint` 12 条 warning（+1，`RefNav.tsx` 的 fast-refresh 告警，与既有 11 条同类）。

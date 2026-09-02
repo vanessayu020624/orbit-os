@@ -1,0 +1,178 @@
+<h1 id="c9">第 9 章　文档—代码一致性审计</h1>
+
+<p class="lead">这一章是本册的信用底座。写它的理由很简单：前八章都声称「以代码为准」，那就必须说清楚<b>代码和已有文档在哪里不一致、为什么会不一致</b>。否则读者无从判断该信哪一份。</p>
+
+<h2 id="c9-1">9.1　审计方法、范围与时点</h2>
+
+<div class="box box-warn">
+  <span class="bt">先说一件影响本章读法的事：审计全程仓库都在被并发修改</span>
+  <p>本章不是一次快照式审计，而是<b>两个观测窗口</b>拼起来的：第一窗 <b>18:31 – 19:21</b>（约 50 分钟），第二窗 <b>19:21 – 22:29</b>（约 3 小时）。两窗之间仓库都在被人持续修改。<b>我在第一窗记录的若干结论，到第二窗复核时已经失效——不是因为我记错了，而是因为代码和文档真的变了。</b></p>
+  <p>这本身是本章最有价值的一次观测：它把「文档漂移」从一个抽象概念变成了一段可以计时的过程，而且给出了漂移的<b>速率</b>——三个小时里，一份文档的同一项事实性声明可以过期两次，写出两个都不对的值（B-13）。§9.3 完整记录了两个窗口里发生的事。</p>
+  <p>因此本章所有结论都锚定一个明确时点：<b>2026-09-02 22:29</b>，HEAD 为 commit <code>42f0451</code>，工作区含 2 个未提交改动（<code>src/agent/llm.ts</code>、<code>functions/tsconfig.json</code>）。<b>不锚定时点的一致性审计是没有意义的。</b></p>
+</div>
+
+<p>第一窗审计时，基线是 <code>7085852</code> 之上一个含 30 个已修改文件的工作区快照——一个无法被任何人复现的状态。第二窗开始时，那批改动已经落成三个提交（<code>4ecc6e7</code> 反编造改为执行期拦截、<code>758087b</code> 结论区排版 / 窄屏说明页 / 飞书推送、<code>42f0451</code> 飞书环境变量样例），审计对象因此第一次变成了<b>可复现的</b>。这是三小时里最实质的一项改善，虽然它不在任何冲突清单上。</p>
+
+<table class="tight">
+<thead><tr><th style="width:24%">审计对象</th><th style="width:20%">状态（22:29）</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><code>README.md</code></td><td><b>再次失效</b></td><td>19:21 曾完全对齐，3 小时后<b>又错了，而且是自相矛盾地错</b>：同一文件内 <code>:108</code> 写「16 文件 236 用例」、<code>:133</code> 写「13 files / 205 tests」，实际 <b>17 文件 308 用例</b>。见 B-13</td></tr>
+<tr><td><code>docs/PRD.md</code></td><td><b>多处失效（未变）</b></td><td><b>三小时里唯一一份一个字没动的核心文档</b>：权限矩阵三处与代码相反，B-01 / B-02 / B-03 全部原样存在</td></tr>
+<tr><td><code>docs/agent-design.md</code></td><td>改善，但引入新冲突</td><td>新增了自己的 14 场景实测表——<b>与本册 §6.2.1 同口径、同 harness、同场景，数字逐行不同</b>。见 B-14</td></tr>
+<tr><td><code>docs/demo-script.md</code></td><td><span class="tag t-code">已对齐</span></td><td><b>B-05 已修复</b>：<code>:330</code> 现给出完整正确的 15（只读 11 / 写 4）与 9 / 11 / 10 / 15</td></tr>
+<tr><td><code>docs/OrbitOS-项目经验分享报告.pdf</code></td><td><b>整体过时（未变）</b></td><td>27 页，仍描述已被替换的模型与重试策略；源文件仍未入库</td></tr>
+<tr><td>实测数据的<b>原始输出</b></td><td><span class="tag t-p0">P0 · 仍不在仓库</span></td><td>见 B-07。三小时里又新产生了一份未归档的实测表（B-14），问题在扩大而不是收敛</td></tr>
+</tbody>
+</table>
+
+<p><b>审计方法：</b>对每一条可验证的事实性陈述回到源码逐条核对。工具数通过逐个读取 <code>allowedRoles</code> 数组计数得出，不采信任何文档的记载；测试状态通过实际执行 <code>npm test</code> 得出；实测数字通过定位其原始输出文件比对得出。<b>凡是无法定位到证据的陈述，一律记为「不可验证」而不是「正确」。</b></p>
+
+<h2 id="c9-2">9.2　冲突清单：14 项</h2>
+
+<p>下表的「22:29 状态」列记录的是第二观测窗结束时每一项的去向。<b>三小时里 12 项中修复了 2 项、原样保留 10 项、新增 2 项</b>——净减 0。这个净值本身就是 §9.4 那套制度性修复的论据：靠人记得去改，修复速度追不上漂移速度。</p>
+
+<table class="tight">
+<thead><tr><th style="width:5%">编号</th><th style="width:5%">级别</th><th style="width:21%">文档怎么说</th><th style="width:21%">代码 / 事实如何</th><th style="width:10%">22:29 状态</th><th>影响与修复</th></tr></thead>
+<tbody>
+<tr><td><b>B-01</b></td><td><span class="tag t-p0">P0</span></td><td><code>PRD.md:83</code>：可用工具数 <b>9 / 11 / 8 / 11</b></td><td>实际 <b>9 / 11 / 10 / 15</b>（逐个数 <code>allowedRoles</code>）</td><td class="ctr"><span class="tag t-p0">未修</span></td><td>供应链少记 2 个、CEO 少记 4 个。修：以 §3.3.1 矩阵替换，并按 §9.4.2 改为自动生成</td></tr>
+<tr><td><b>B-02</b></td><td><span class="tag t-p0">P0</span></td><td><code>PRD.md:94</code>：CEO <b>写权限合计 0</b>；<code>:98</code> 另有整段论证「为什么 CEO 没有写权限」</td><td>CEO 拥有<b>全部 4 个</b>写工具，且有专为其设计的越权提示（<code>rbac.ts:96</code> <code>overrideNoticeFor</code>）</td><td class="ctr"><span class="tag t-p0">未修</span></td><td><b>最严重的一项</b>：不是数字错，是<b>一整段设计论证的前提与代码相反</b>。而 <code>demo-script.md:185</code> 已改成正确表述——两份文档现在互相矛盾</td></tr>
+<tr><td><b>B-03</b></td><td><span class="tag t-p1">P1</span></td><td><code>PRD.md:84</code>：供应链对「客户 / 商机」<b>✗ 无权</b></td><td>客户<b>全部 48 个可见</b>（<code>rbac.ts:26</code>）；商机才是 <code>[]</code>（<code>rbac.ts:51</code>）</td><td class="ctr"><span class="tag t-p1">未修</span></td><td>两个数据域被合并成一格表述，把「一个有权一个无权」压成了「都无权」</td></tr>
+<tr><td><b>B-04</b></td><td><span class="tag t-p1">P1</span></td><td><code>PRD.md:37</code> / <code>demo-script.md:45</code>：仪表盘「每 4 秒推进一条模拟业务事件」</td><td>功能<b>已彻底删除</b>，全仓库零 <code>setInterval</code>；<code>Dashboard.tsx:12</code> 留有说明注释</td><td class="ctr"><span class="tag t-p1">未修</span></td><td>demo-script 那句写在「卡住了怎么办」段落里，等于教人期待一个不会发生的现象。README 已改对，这两处漏改</td></tr>
+<tr><td><b>B-05</b></td><td><span class="tag t-p1">P1</span></td><td><code>demo-script.md</code> 内部：<code>:55</code> 供应链 8、<code>:153</code> 供应链 8、<code>:178</code> CEO 11、<code>:310</code> 供应链 8 / CEO 11、<code>:185</code> CEO 15 含 4 个写工具</td><td>正确值 10 / 15</td><td class="ctr"><b>已修复</b></td><td><b>矛盾曾是半途修改造成的</b>：19:21 时只改了 185 行、其余 4 处没动。22:29 复核已<b>全部改齐</b>——这是三小时里唯二被真正修完的一项，也证明「局部修正制造新矛盾」是可以收敛的，前提是有人回过头把同一事实的所有出处一起改</td></tr>
+<tr><td><b>B-06</b></td><td><span class="tag t-p1">P1</span></td><td><code>agent-design.md:199</code>：工具层的金额遮蔽由 <code>maskOrderForRole</code> 实现</td><td>Agent 链路走的是 <code>present.ts</code> 的另一份实现；<code>maskOrderForRole</code> 只被 UI（<code>Orders.tsx:15</code>）调用，<b>没有任何工具调用它</b></td><td class="ctr"><span class="tag t-p1">未修</span></td><td>双实现且归因写错。修：统一到 <code>present.ts</code>，UI 改为复用（G-10）</td></tr>
+<tr><td><b>B-07</b></td><td><span class="tag t-p0">P0</span></td><td><code>agent-design.md §6</code> 与 <code>demo-script.md:305</code> 给出大量实测数字，并声明「每一行都是真跑出来的」</td><td><b>数据确实是真跑出来的，但原始输出文件不在仓库里</b>——只存在于一个临时目录。仓库中无任何评测结果文件</td><td class="ctr"><span class="tag t-p0">未修·扩大</span></td><td><b>本次审计最严重的发现</b>，展开见 §9.3.2</td></tr>
+<tr><td><b>B-08</b></td><td><span class="tag t-p0">P0</span></td><td>同一套文档里的实测数字</td><td><b>来自两次不同的运行</b>：<code>agent-design.md:492-502</code> 的表对应一次运行（剧本 A 29.5s / 18,074 输入），<code>demo-script.md:274</code> 的「129 条引用全部可核对」对应另一次（同场景 29.1s / 13,444）</td><td class="ctr"><span class="tag t-p0">未修·扩大</span></td><td>读者若交叉核对会发现同一场景两个数。修：一次运行产出一套数字，全文档统一引用同一份归档</td></tr>
+<tr><td><b>B-09</b></td><td><span class="tag t-p1">P1</span></td><td><code>agent-design.md:522</code>：「同一问题的跑间方差 —— <b>未统计</b>」</td><td>数据其实已经存在：<code>rep-2</code> 跑过 3 次、<code>edge-1</code> 跑过 8 次，实测方差 <b>2.35×</b> 与 <b>2.6×</b></td><td class="ctr"><span class="tag t-p1">部分</span></td><td><b>方向与 A-06 同类：文档比实际悲观</b>。已有的证据没被汇总回文档，等于白跑。数据见 §6.7.3</td></tr>
+<tr><td><b>B-10</b></td><td><span class="tag t-p1">P1</span></td><td><code>agent-design.md §7</code>：30 条离线标注评测集（分层、样例、三个指标公式俱全）</td><td>设计完整，<b>但从未执行</b>：仓库中无评测运行代码、无标注文件、无结果</td><td class="ctr"><span class="tag t-p1">未修</span></td><td>需与 B-07 的端到端回归区分：<b>那 14 条是回归，不是评测</b>——它验证「有没有坏」，不产出准确率指标。修：§6.5 扩至 60 条并进 CI（§7.2）</td></tr>
+<tr><td><b>B-11</b></td><td><span class="tag t-p2">P2</span></td><td><code>agent-design.md:40</code> §1 的「实测数据（待补）」表仍是三行「待实测」</td><td>§6 已补上完整实测表</td><td class="ctr"><span class="tag t-p2">未修</span></td><td>同一文档内新旧并存。低危但显眼</td></tr>
+<tr><td><b>B-12</b></td><td><span class="tag t-p2">P2</span></td><td><code>docs/OrbitOS-项目经验分享报告.pdf</code>（27 页）</td><td>整体过时：仍写 GLM-4.5-Flash 免费档、「退避 6 秒重试 1 次」、并发上限 2 路、31 commit / 141 条用例；且<b>源 HTML 未入库</b>，无法增量修订</td><td class="ctr"><span class="tag t-p2">未修</span></td><td>二进制交付物比 Markdown 更难发现过时。修：源文件入库，或在封面标注「快照日期 + 已被 XX 取代」</td></tr>
+<tr><td><b>B-13</b></td><td><span class="tag t-p0">P0</span></td><td><code>README.md:108</code>：「<b>16 个测试文件 236 条用例</b>」；同一文件 <code>:133</code>：「<code>npm test</code>，<b>应为 13 files / 205 tests 全绿</b>」</td><td>实际 <b>17 文件 308 用例</b>（22:29 实测，全绿）。两个记载互不相同，且<b>都不等于实际值</b></td><td class="ctr"><b>新增</b></td><td><b>本轮最具讽刺意味的一项。</b>19:21 时这个文件刚被修对（A-12），§9.4.2 因此提出「测试数改由 CI 徽章生成」。三小时后它<b>又过期了两次</b>，一次在 108 行、一次在 133 行，写出两个不同的错值。<b>它把「人写的质量声明会过期」从推论变成了可重复观测的现象</b>——同一个人、同一个文件、同一天，三小时内复发</td></tr>
+<tr><td><b>B-14</b></td><td><span class="tag t-p0">P0</span></td><td><code>agent-design.md §6「实测数据」</code>：9 行实测表，并声明「每一行都是真跑出来的」「不放估算值」，测量方式写明是 <code>e2e/regression.test.ts</code> 的 12+2 条</td><td><b>与本册 §6.2.1 是同一个 harness、同一批场景，但数字逐行不同</b>：ceo-1 6.8s/7,747 vs 6.3s/8,084；sc-1 18,074 vs 13,444 输入；edge-1 43.4s/16,531 vs 60.1s/29,060；edge-2 3.2s/1,248 vs 2.7s/1,317。且只报了 14 条中的 9 条</td><td class="ctr"><b>新增</b></td><td><b>这是 B-07 的直接后果，也是它最好的证明。</b>两份文档都诚实、都真跑过、都没造假，但因为两次运行都没归档，读者交叉核对时<b>无法判断哪一份对应哪次运行，也无法判断差异是方差还是错误</b>。讽刺的是这组差异恰恰是一份现成的跑间方差样本（edge-1 输入 token 1.76×），却因为缺少归档而只能表现为「两份文档打架」。展开见 §9.3.4</td></tr>
+</tbody>
+</table>
+
+<h2 id="c9-3">9.3　审计窗口内实时观测到的漂移与收敛</h2>
+
+<h3>9.3.1　50 分钟里发生了什么</h3>
+
+<p>下面这张表不是设计出来的，是审计过程中被动记录下来的。它的价值在于：<b>大多数一致性审计只能看到漂移的结果，这一次看到了漂移与修复正在发生。</b></p>
+
+<table class="tight">
+<thead><tr><th style="width:10%">时点</th><th style="width:30%">发生了什么</th><th>对审计结论的影响</th></tr></thead>
+<tbody>
+<tr><td>19:11</td><td>第一遍审计记录：<code>npm test</code> → <b>6 failed / 179 passed（185）</b>，README 声称全绿</td><td>记为 P0 冲突 A-12</td></tr>
+<tr><td>19:16</td><td>复核实测：<b>1 failed / 205 passed（206）</b>，失败的是一个此前不存在的文件 <code>src/agent/__e2e.test.ts</code></td><td><b>原结论作废。</b>Guard A 相关的 6 条断言已在 18:41–18:43 被修好</td></tr>
+<tr><td>19:18</td><td>该文件被移出 <code>src/</code> → <code>e2e/regression.test.ts</code>，并新增一轮追问场景</td><td>—</td></tr>
+<tr><td>19:19</td><td><code>vite.config.ts</code> 新增 <code>exclude: ['e2e/**']</code></td><td>—</td></tr>
+<tr><td>19:21</td><td>再次实测：<b>13 files / 205 tests 全绿</b>；README 已改为「应为 13 files / 205 tests 全绿」</td><td><b>A-12 彻底失效。</b>README 与代码现已完全一致</td></tr>
+</tbody>
+</table>
+
+<div class="box box-key">
+  <span class="bt">那个失败的测试，是一个值得单独讲的产品判断</span>
+  <p>19:16 的唯一失败不是逻辑错误，是<b>分类错误</b>：一份打真实模型、要外网、跑几分钟、结果天然不确定的端到端回归，被放在 <code>src/</code> 下，因而被 <code>npm test</code> 默认收编了。</p>
+  <p>它的失败症状（<code>writeFileSync(undefined)</code> 抛 TypeError，因为 <code>E2E_OUT</code> 环境变量没设）是表象。真正的问题是：<b>如果它「成功」了，后果更糟</b>——每次 <code>npm test</code> 都会真的向线上模型发 14 次请求，CI 会变成一个要花钱、要联网、并且结果随模型心情变化的东西。</p>
+  <p>修法（移出 <code>src/</code> + 单独的 <code>vitest.e2e.config.ts</code> + 主配置 <code>exclude</code>）背后是一条通用判断：<b>确定性测试与非确定性测试必须物理隔离，因为它们的准入标准正好相反。</b>前者要快、要稳、要阻断合并；后者要慢、允许波动、只能作为人工验收关卡。混在一起的结果是前者失去可信度——一个偶尔飘红的 CI，等同于没有 CI。</p>
+</div>
+
+<h3 id="c9-3-2">9.3.2　B-07 详解：实测数据是真的，但它的证据不在仓库里</h3>
+
+<p><code>agent-design.md §6</code> 写着一句很有分量的话：<b>「面试里任何一个数字都会被追问『你怎么测的』，所以这里不放估算值。」</b>这个态度是对的，数据也确实是真跑出来的——端到端回归装置（<code>e2e/regression.test.ts</code>）真实调用线上 qwen-plus，逐条记录墙钟、token、工具链和引用核对结果。</p>
+
+<p>问题在于最后一步：<b>装置的输出通过环境变量 <code>E2E_OUT</code> 指定路径，实际写到了一个临时目录，没有任何一份被归档进仓库。</b></p>
+
+<table class="tight">
+<thead><tr><th style="width:30%">当前状态</th><th>后果</th></tr></thead>
+<tbody>
+<tr><td>文档里有数字</td><td>读者只能选择相信</td></tr>
+<tr><td>仓库里有装置</td><td>读者可以重跑，但<b>重跑得到的是新数字，不是复核旧数字</b>——模型非确定，两次跑不一样（B-09 实测 2.6×）</td></tr>
+<tr><td>仓库里<b>没有</b>原始输出</td><td><b>文档中的每一个实测数字都无法被验证</b>，也无法被差分比较。临时目录一旦清理，证据永久消失</td></tr>
+</tbody>
+</table>
+
+<div class="box box-gap">
+  <span class="bt">为什么这条比「数字写错了」更严重</span>
+  <p>一个写错的数字是可以被发现和修正的；<b>一个无法验证的正确数字，和一个无法验证的错误数字，在读者那里是同一样东西。</b></p>
+  <p>更具体地说，这条缺口直接摧毁了三件事：<b>①</b> §6.8 的上线门槛无法判定（门槛要对比历史值，没有历史值就没有对比）；<b>②</b> B-08 那种「两次运行的数字混在一套文档里」的问题无法被自动发现；<b>③</b> 任何一次改动之后，「这次比上次慢了还是快了」这个最基本的问题答不上来。</p>
+  <p><b>修复成本极低</b>——把 <code>e2e-final.md</code> 这类输出连同运行时间戳、模型名、代码 commit 一起归档进 <code>docs/eval-runs/</code>，一次提交的事。<b>成本低而后果重，是所有缺口里最该先修的那一类。</b></p>
+</div>
+
+<h3>9.3.3　审计期间已被修复的 4 项</h3>
+
+<p>为完整起见记录如下。它们在第一遍审计中成立，在复核时已失效：</p>
+
+<table class="tight">
+<thead><tr><th style="width:8%">原编号</th><th style="width:34%">原冲突</th><th>现状</th></tr></thead>
+<tbody>
+<tr><td>A-05</td><td>文档称模型为 GLM-4.5-Flash</td><td>两份文档均已改为 qwen-plus；GLM 仅作为「换掉的第一版」出现在历史叙述中</td></tr>
+<tr><td>A-06</td><td><code>agent-design.md</code> 称「引用标红划掉」是最大的<b>未实现</b>缺口</td><td>已改为「原本是最大的一处缺口，<b>已补上</b>」，与 <code>RefChip.tsx:21-30</code> 一致</td></tr>
+<tr><td>A-10</td><td><code>agent-design.md</code> 工具数与代码不符</td><td><code>:17</code> 已改为 9 / 11 / 10 / 15，逐字吻合</td></tr>
+<tr><td>A-12</td><td>README 称「12 文件 / 185 条测试全绿」而实测 6 条失败</td><td>已改为「13 files / 205 tests 全绿」，且实测确实全绿</td></tr>
+</tbody>
+</table>
+
+<p><b>这四项的共同点值得注意：它们全都发生在 <code>README.md</code> 和 <code>agent-design.md</code> 上，而 <code>PRD.md</code> 在整个窗口内只改了 1 行（且改的是别处）。</b>这不是巧合——README 和设计文档在开发中会被反复打开，PRD 写完之后就很少再被读。<b>漂移最严重的文档，往往正是那份「最正式、最没人再看」的。</b></p>
+
+<h3>9.3.4　第二观测窗（19:21 → 22:29）：修复与复发同时发生</h3>
+
+<p>第一窗结束三小时后重新复核。这三小时里仓库产生了三个提交、53 个文件、+2,556 / −572 行。变化分三类：</p>
+
+<table class="tight">
+<thead><tr><th style="width:16%">类别</th><th style="width:34%">发生了什么</th><th>对本册的影响</th></tr></thead>
+<tbody>
+<tr><td><b>① 状态变可复现</b></td><td>第一窗那 30 个未提交改动全部落成 <code>4ecc6e7</code> / <code>758087b</code> / <code>42f0451</code></td><td><b>正面。</b>审计对象从「某人机器上的工作区」变成了三个任何人都能 checkout 的 commit。本章的时点锚定因此第一次有了公共坐标</td></tr>
+<tr><td><b>② 能力真实增长</b></td><td>反编造从事后标红改为<b>执行期拦截</b>（<code>4ecc6e7</code>）；<code>resolveRef</code> 抽到 <code>lib/refLookup.ts</code> 并改为<b>按角色 scope 解析</b>；新增结论区 Markdown 渲染、上下文可视面板、窄屏门禁、飞书风险推送；单测 205 → <b>308</b></td><td>本册 §3、§4、§8 需要补写这几项，已在对应章节更新</td></tr>
+<tr><td><b>③ 文档同步再次落后</b></td><td>README 测试数<b>又过期两次</b>（B-13）；agent-design 新增的实测表与本册数字对不上（B-14）；PRD 一字未动</td><td><b>负面，且是同一根因的复发。</b>新增的两项 P0 都属于「事实变了、记载没跟上」</td></tr>
+</tbody>
+</table>
+
+<div class="box box-gap">
+  <span class="bt">B-14 才是这次审计真正想让读者看见的东西</span>
+  <p>B-13（测试数写错）看起来像个笔误。B-14 不是——它是<b>一个诚实的人、按正确的方法、用同一个工具，得出了一份没人能验证的数据</b>。</p>
+  <p><code>agent-design.md</code> 的实测表写得比本册还谨慎：它明确交代了测量方式（<code>e2e/regression.test.ts</code>、打线上 <code>/api/chat</code>、每条前 <code>resetUsage()</code>），还专门加了一句「面试里任何一个数字都会被追问『你怎么测的』，所以这里不放估算值」。<b>态度是满分的。</b></p>
+  <p>但它和本册 §6.2.1 逐行对不上：同一条 <code>edge-1</code>，那边 43.4s / 16,531 输入，这边 60.1s / 29,060 输入。两边都没造假，差的是<b>两次不同的运行</b>——而两次运行都没有归档。于是读者拿到两个数，无从判断：是方差？是改了 prompt 之后的前后差异？还是有一边抄错了？</p>
+  <p><b>结论：<code>resetUsage()</code> 这种级别的严谨，会被「结果没存盘」这一件小事全部抵消。</b>方法论的严谨度不等于结论的可信度——中间隔着一个归档动作，而这个动作的成本是 <code>git add</code>。</p>
+  <p>还有一层：这两份表放在一起，本身就是一份现成的双跑样本（<code>edge-1</code> 输入 token 1.76×，与 §6.7.3 独立测到的 2.6× 同量级，互为佐证）。<b>本可以是证据的东西，因为缺归档而变成了打架。</b></p>
+</div>
+
+<h2 id="c9-4">9.4　根因分析与制度性修复</h2>
+
+<h3>9.4.1　漂移的四个来源</h3>
+
+<table>
+<thead><tr><th style="width:22%">来源</th><th style="width:28%">典型症状</th><th>对应条目</th></tr></thead>
+<tbody>
+<tr><td><b>① 语义修订未回写</b></td><td>某次提交调整了权限语义（给 CEO 开放写工具并加越权提示），代码改了，PRD 没改</td><td>B-01 ~ B-03</td></tr>
+<tr><td><b>② 技术替换未回写</b></td><td>换模型、删功能，代码改了，设计文档与演示脚本没改</td><td>B-04、B-12</td></tr>
+<tr><td><b>③ 局部修正制造新矛盾</b></td><td>发现某处数字错了，只改了看到的那一处，同一文档其余四处不动</td><td><b>B-05</b>、B-11</td></tr>
+<tr><td><b>④ 证据与结论分离</b></td><td>结论进了文档，产生结论的原始数据留在一次性目录里</td><td><b>B-07、B-08、B-09</b></td></tr>
+</tbody>
+</table>
+
+<p>第 ③ 类和第 ④ 类是这次审计相对上一次的新增，也是更值得写下来的两类：</p>
+
+<p><b>③ 说明「修文档」本身也是一种可能制造缺陷的操作。</b>一份全错的文档至少是一致的，读者读完会得到一个统一（虽然错误）的认知；一份改对了五分之一的文档，读者会在内部矛盾处停下来，然后<b>不知道该信哪一半</b>。修文档的正确粒度是「一个事实的全部出现位置」，不是「我刚好看到的那一行」——这也正是 §9.4.2 主张自动生成的直接理由。</p>
+
+<p><b>④ 说明可信度的载体不是结论，是证据。</b>B-09 尤其能说明问题：跑间方差的数据<b>已经跑出来了</b>，只是没被汇总回文档，于是文档里仍写着「未统计」。做过的工作因为没有归档而等同于没做——这比没做更可惜，因为成本已经付了。</p>
+
+<h3>9.4.2　制度性修复：让文档不再需要靠人记得去改</h3>
+
+<table>
+<thead><tr><th style="width:22%">措施</th><th style="width:14%">解决</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><b>权限矩阵自动生成</b></td><td>①③</td><td>写一个脚本从各工具的 <code>allowedRoles</code> 直接生成 §3.3.1 那张表，作为构建产物。<b>B-01~B-03 与 B-05 从此不可能再发生</b>——12 项里消灭 4 项，且是永久消灭。投入产出比最高的一项</td></tr>
+<tr><td><b>评测运行归档入库</b></td><td><b>④</b></td><td>每次端到端回归的原始输出连同<b>时间戳、模型名、代码 commit</b> 一起提交到 <code>docs/eval-runs/</code>。文档中的实测数字标注「取自 <code>eval-runs/2026-09-02-1912.md</code>」。B-07、B-08 一次性解决，并让 §6.8 的门槛第一次真的可判定</td></tr>
+<tr><td><b>测试状态由 CI 徽章生成</b></td><td>②</td><td>README 不再手写测试数。人写的质量声明会过期，机器生成的不会。<b>本次审计验证了两次</b>：手写的「185 条全绿」先错了整整一天；改对之后<b>三小时内又错了两次</b>（B-13：同一文件里并存「236 用例」与「205 tests」，实际 308）。<b>一个需要人记得去改的数字，修好它只是把下一次过期推迟几小时</b></td></tr>
+<tr><td><b>确定性测试与非确定性测试物理隔离</b></td><td>兜底</td><td>已在审计窗口内自发完成（§9.3.1）。制度化的说法是：<b>凡是需要外网、需要付费、结果不确定的检查，一律不进 <code>npm test</code></b>，另起配置与另起门禁</td></tr>
+<tr><td><b>文档事实标注出处</b></td><td>①②③</td><td>凡引用配置常量的地方标注 <code>文件:行号</code>，使核对成本降到一次跳转。本册全篇如此</td></tr>
+<tr><td><b>PR 模板加一栏「受影响文档」</b></td><td>①②③</td><td>低成本高效果。改 <code>allowedRoles</code>、改模型、删功能时强制勾选</td></tr>
+<tr><td><b>修文档以「事实」为单位，不以「行」为单位</b></td><td><b>③</b></td><td>发现一个数字错了，先全仓库 grep 这个数字的所有出现位置，一次改完。B-05 就是没做这一步的直接产物</td></tr>
+</tbody>
+</table>
+
+<div class="box box-key">
+  <span class="bt">这一章真正想说明的事</span>
+  <p>12 项冲突里，<b>没有一项是因为写文档的人不认真</b>——恰恰相反，审计窗口内有人正在积极地修文档，四项冲突当场被消灭。它们全都是因为代码在演进而文档是静态快照，这是所有项目的默认结局，不是例外。</p>
+  <p>所以修复的重点不在「以后要记得更新文档」（这条规则从来没有生效过），而在<b>把可自动生成的部分自动化，把不能自动化的部分标注来源，把产生结论的证据和结论放在一起</b>。§9.4.2 的前两行——权限矩阵自动生成、评测运行归档入库——就能消灭这次审计 12 项里的 6 项。</p>
+  <p>这也是本册全篇标注 <code>文件:行号</code>、并对每个数字标注四级来源的原因：<b>标了出处的陈述会随代码一起腐烂，但它的腐烂是可检测的</b>——任何人跳转过去一看就知道对不对。没标出处的陈述则会静默地错下去，而且它错的时候看起来和对的时候一模一样。</p>
+</div>
