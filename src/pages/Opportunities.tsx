@@ -1,3 +1,4 @@
+import { useSearchParams } from 'react-router-dom'
 import { useStore } from '../lib/store'
 import { scopeOpportunities, scopeSummary } from '../lib/rbac'
 import { scopeHeaderText, scopeEmptyText } from '../lib/scopeText'
@@ -6,6 +7,9 @@ import { StatusChip, STAGE_TONE } from '../components/StatusChip'
 import { money, pct } from '../lib/format'
 
 export default function Opportunities() {
+  // 溯源标签带 ?focus=xxx 跳过来时，自动把关键词填进搜索框，直接定位到那一条。
+  const [params] = useSearchParams()
+  const focus = params.get('focus') ?? ''
   const { db, currentUser } = useStore()
   const rows = scopeOpportunities(db, currentUser)
   const scope = scopeSummary(db, currentUser, 'opportunities')
@@ -17,10 +21,14 @@ export default function Opportunities() {
         <span className="text-sm text-slate-400">{scopeHeaderText(scope)}</span>
       </div>
       <DataTable
+        key={focus}
+        initialQuery={focus}
         rows={rows}
         empty={scopeEmptyText(scope)}
-        searchKeys={['name', 'customer']}
+        searchKeys={['id', 'name', 'customer']}
         columns={[
+          // 编号列的理由同 pages/Customers.tsx：Agent 引用的东西必须在界面上搜得到。
+          { key: 'id', title: '商机编号', width: '110px' },
           { key: 'name', title: '商机名', width: '180px', sortable: true },
           { key: 'customer', title: '客户',
             value: (r) => db.customers.find(c => c.id === r.customerId)?.name ?? '',

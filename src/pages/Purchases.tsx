@@ -1,3 +1,4 @@
+import { useSearchParams } from 'react-router-dom'
 import { useStore } from '../lib/store'
 import { DataTable } from '../components/DataTable'
 import { StatusChip, PO_TONE } from '../components/StatusChip'
@@ -6,6 +7,9 @@ import { scopePurchaseOrders, scopeSummary } from '../lib/rbac'
 import { scopeHeaderText, scopeEmptyText } from '../lib/scopeText'
 
 export default function Purchases() {
+  // 溯源标签带 ?focus=xxx 跳过来时，自动把关键词填进搜索框，直接定位到那一条。
+  const [params] = useSearchParams()
+  const focus = params.get('focus') ?? ''
   const { db, currentUser } = useStore()
   const rows = scopePurchaseOrders(db, currentUser)
   const scope = scopeSummary(db, currentUser, 'purchases')
@@ -17,6 +21,8 @@ export default function Purchases() {
         <span className="text-sm text-slate-400">{scopeHeaderText(scope)}</span>
       </div>
       <DataTable
+        key={focus}
+        initialQuery={focus}
         rows={rows}
         empty={scopeEmptyText(scope)}
         searchKeys={['poNo', 'supplier']}

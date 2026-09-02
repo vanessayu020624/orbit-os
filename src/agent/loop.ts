@@ -1,8 +1,9 @@
 import type { AgentEvent, Plan, ToolContext, User, Mutation, PlanStep } from '../lib/types'
-import { chat, extractJson, LlmUnavailable, type ChatMessage } from './llm'
+import { chat, extractJson, describeLlmError, type ChatMessage } from './llm'
 import { plannerPrompt, executorPrompt, type Turn } from './prompts'
 import { toolSchemasFor, executeTool, auditOf, ALL_TOOLS, toolsFor } from './registry'
 import { overrideNoticeFor } from '../lib/rbac'
+import { resolveRef } from '../lib/refLookup'
 import type { DbSnapshot, AuditEntry } from '../lib/types'
 
 export interface RunAgentOptions {
@@ -16,6 +17,8 @@ export interface RunAgentOptions {
   requestConfirm: (id: string, toolName: string, args: unknown, summary: string) => Promise<boolean>
   /** 最近几轮问答，用于让追问能理解指代。不传则按单轮处理。 */
   history?: Turn[]
+  /** 更早轮次折叠成的会话摘要。见 agent/summarize.ts。 */
+  summary?: string
 }
 
 const MAX_TURNS = 12
@@ -30,7 +33,7 @@ export async function runAgent(o: RunAgentOptions): Promise<void> {
     const res = await chat({
       jsonMode: true,
       messages: [
-        { role: 'system', content: plannerPrompt(o.user, o.history) },
+        { role: 'system', content: plannerPrompt(o.user, o.history, o.summary) },
         { role: 'user', content: o.question },
       ],
     })
@@ -38,8 +41,9 @@ export async function runAgent(o: RunAgentOptions): Promise<void> {
     if (!Array.isArray(plan.steps)) plan.steps = []
     plan.steps = plan.steps.map((s, i) => ({ ...s, id: s.id || `s${i + 1}` }))
   } catch (e) {
-    o.emit({ type: 'error', message: e instanceof LlmUnavailable
-      ? 'LLM 服务不可用，已切换录播模式' : `规划失败：${String(e)}` })
+    // 不再把 String(e) 上屏：AbortError 之类的内部报错对用户没有任何可操作性。
+    // 分类文案统一由 describeLlmError 出，UI 侧再补「重试」按钮和「左侧数据仍可查」的出路。
+    o.emit({ type: 'error', message: `规划阶段中断。${describeLlmError(e).text}` })
     throw e
   }
   // 空计划时 plan.goal 会同时渲染成计划卡标题和 final 卡，同一句话在屏幕上出现两遍。
@@ -55,7 +59,7 @@ export async function runAgent(o: RunAgentOptions): Promise<void> {
 
   // ---------- Phase 2: Executor ----------
   const messages: ChatMessage[] = [
-    { role: 'system', content: executorPrompt(o.user, plan, o.history) },
+    { role: 'system', content: executorPrompt(o.user, plan, o.history, o.summary) },
     { role: 'user', content: o.question },
   ]
   const tools = toolSchemasFor(o.user.role)
@@ -63,17 +67,35 @@ export async function runAgent(o: RunAgentOptions): Promise<void> {
   const writeToolNames = new Set(
     toolsFor(o.user.role).filter(t => t.isWrite).map(t => t.name)
   )
+  // 计划里明确安排过的写入工具。用来区分「计划好的写」和「模型临时起意的写」——
+  // 后者在没有任何数据依据时会被守卫 B 拦下。
+  const plannedWriteTools = new Set(
+    plan.steps.flatMap(s => s.expectedTools ?? []).filter(t => writeToolNames.has(t))
+  )
   let writeResolved = false
   let nudged = false
+  /** 真正执行成功的工具次数。0 表示这次回答到目前为止没有任何数据依据。 */
+  let toolResults = 0
+  /**
+   * 用户拒绝过写操作。这是「零工具结果也允许收尾」的唯一合法情形——
+   * 用户说了不做，模型就该回一句「已取消」，不该被守卫 A 逼着再去查一遍数据。
+   */
+  let userDeclined = false
+  let noToolNudged = false
+  let refined = false
   let stepIdx = 0
   o.emit({ type: 'step_start', stepId: plan.steps[0].id })
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     let res: ChatMessage
     try {
-      res = await chat({ messages, tools })
+      // 还一条数据都没查到时强制走工具。实测 qwen-plus 在多步只读计划上会直接跳过工具编造整段
+      // 答案（营收、漏斗、单号全是假的），而 tool_choice: 'auto' 和提示词都拦不住。
+      // 只在「零工具结果」期间强制，拿到数据后立刻放开，否则模型永远没法收尾。
+      const force = toolResults === 0 && !userDeclined && tools.length > 0
+      res = await chat({ messages, tools, toolChoice: force ? 'required' : 'auto' })
     } catch (e) {
-      o.emit({ type: 'error', message: `执行中断：${String(e)}` })
+      o.emit({ type: 'error', message: `执行阶段中断。${describeLlmError(e).text}` })
       throw e
     }
     messages.push(res)
@@ -90,6 +112,24 @@ export async function runAgent(o: RunAgentOptions): Promise<void> {
 
     const calls = res.tool_calls ?? []
     if (!calls.length) {
+      // ---------- 守卫 A：零数据依据不许收尾 ----------
+      // 实测故障：销售总监问「本月团队营收和漏斗」，执行器一个工具都没调，
+      // 直接编出 1842.6 万营收、六段漏斗、八个不存在的单号，还编了一个系统里根本没有的
+      // scope.basis。上面的 tool_choice: 'required' 已经在正常路径上堵死了这条路，
+      // 这里是兜底：万一上游忽略了 tool_choice，也绝不让一段没有数据来源的答案发出去。
+      if (toolResults === 0 && !userDeclined) {
+        if (noToolNudged) {
+          o.emit({ type: 'error', message: '这次问询没有取到任何数据，为避免给出没有依据的结论，已中止。请换个说法再问一次。' })
+          return
+        }
+        noToolNudged = true
+        messages.push({
+          role: 'user',
+          content: '你还没有调用任何工具，手上没有任何真实数据。请立刻调用工具查询，再基于返回结果作答。禁止凭常识或经验填充数字、单号、客户名。',
+        })
+        continue
+      }
+
       // 实盘复现：计划里含写入步骤时，模型常用「建议你去采购 X 个」这样的文字收尾，
       // 而不去真的调用 create_purchase_order，导致确认卡与后续联动全部不发生。
       // 这里补推一次。只补一次，避免模型坚持不调用时死循环。
@@ -105,13 +145,31 @@ export async function runAgent(o: RunAgentOptions): Promise<void> {
         continue
       }
 
+      const text = res.content ?? ''
+      const refs = [...new Set([...text.matchAll(/\[\[([^\]]+)\]\]/g)].map(m => m[1]))]
+
+      // ---------- 守卫 C：核不上的引用当场退回重写 ----------
+      // 用户点每一个标注都会跳页核对，核不到就是当场露馅。UI 侧已经把这类标注标红，
+      // 但标红只是止损；这里在发出去之前先给模型一次带着「具体哪几个核不上」的重写机会。
+      // 只给一次：模型如果第二次还编，说明它手上确实没有对应数据，标红比无限重试更诚实。
+      const bad = refs.filter(r => resolveRef(o.getDb(), o.user, r) === null)
+      if (bad.length && !refined) {
+        refined = true
+        messages.push({
+          role: 'user',
+          content: `你标注的这些编号在系统里核对不到：${bad.join('、')}。`
+            + '用户点击每个标注都会跳转核对，核不到就说明是编的。'
+            + '请只保留工具返回结果中原样出现过的编号，把核对不到的标注删掉或换成工具真实返回的编号，'
+            + '并相应修正正文里依赖它们的结论。不要重新调用工具，直接给出修正后的最终回答。',
+        })
+        continue
+      }
+
       // 没有工具调用 = 收尾
       for (let i = stepIdx; i < plan.steps.length; i++) {
         o.emit({ type: 'step_done', stepId: plan.steps[i].id })
       }
-      const text = res.content ?? ''
-      const refs = [...text.matchAll(/\[\[([^\]]+)\]\]/g)].map(m => m[1])
-      o.emit({ type: 'final', text, refs: [...new Set(refs)] })
+      o.emit({ type: 'final', text, refs })
       return
     }
 
@@ -122,6 +180,23 @@ export async function runAgent(o: RunAgentOptions): Promise<void> {
       o.emit({ type: 'tool_call', id: call.id, name, args })
 
       const def = ALL_TOOLS.find(t => t.name === name)
+
+      // ---------- 守卫 B：没有任何数据依据的计划外写操作 ----------
+      // 实测故障：销售总监问「未来两周交付有风险吗」，计划是两步只读，执行器却跳过读工具
+      // 直接调 create_purchase_order 下单，参数里的单号和 SKU 全是编的。
+      // 写操作一旦发出确认卡，用户看到的是一张长得完全正常的卡片，根本无从分辨依据真假。
+      // 所以这一类调用不进 HITL，直接退回：既没查过数据、计划里也没安排，就没有执行的资格。
+      // 计划里安排过的写（例如「建一个回访任务」）不受影响，读后再写也不受影响。
+      if (def?.isWrite && toolResults === 0 && !plannedWriteTools.has(name)) {
+        const blocked = {
+          rejected: true,
+          reason: '拒绝执行：你还没有调用任何只读工具核实数据，本次计划中也没有安排这个写操作。'
+            + '请先查询相关订单、库存或客户数据，确认确实需要之后再调用写入工具。',
+        }
+        o.emit({ type: 'tool_result', id: call.id, result: blocked, ms: 0 })
+        messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(blocked) })
+        continue
+      }
 
       // ---------- Phase 3: HITL ----------
       const overrideNotice = def?.isWrite ? overrideNoticeFor(name, o.user.role) : null
@@ -134,6 +209,7 @@ export async function runAgent(o: RunAgentOptions): Promise<void> {
         // 批准或拒绝都算「这一步已有结论」，补推只针对模型压根没调用写工具的情况。
         writeResolved = true
         if (!approved) {
+          userDeclined = true
           const denial = { rejected: true, reason: '用户拒绝了该写操作，请据此调整建议，不要重复尝试。' }
           o.emit({ type: 'tool_result', id: call.id, result: denial, ms: 0 })
           messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(denial) })
@@ -145,6 +221,7 @@ export async function runAgent(o: RunAgentOptions): Promise<void> {
       o.pushAudit(auditOf(name, args, r, ctx(), !!overrideNotice))
       o.emit({ type: 'tool_result', id: call.id, result: r.result, ms: r.ms })
       messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(r.result) })
+      toolResults++
     }
 
     if (stepIdx < plan.steps.length) {

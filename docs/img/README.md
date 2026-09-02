@@ -5,7 +5,7 @@ README 里三处 `📸 截图待补` 占位对应下面三张图。拍完后把�
 **统一前提**
 
 - 浏览器窗口宽度 ≥ 1440px（右侧 Sidekick 固定 420px，窄了会挤）。
-- 先打开 <https://orbit-os.pages.dev>（或本地 `npx wrangler pages dev`），确保 Sidekick 顶部**没有**「录播模式」黄色角标——录播模式截图会被面试官问到，能拍真的就拍真的。
+- 先打开 <https://orbit-os.pages.dev>（或本地 `npx wrangler pages dev`），确认提问能真的跑通（有计划卡 + 工具卡 + 带蓝色可点标签的结论）。截图必须是真跑的结果。
 - 顶栏「重置演示数据」可以把数据恢复到 `generateSeed(42)` 初始态，拍砸了就点它重来。
 - 截图前把浏览器缩放调回 100%，隐藏书签栏。
 

@@ -10,7 +10,15 @@ export interface DeliveryRisk {
   orderId: string; orderNo: string; customerName: string
   promisedDeliveryDate: string
   shortages: Shortage[]
-  incomingEta: string | null       // 该 SKU 最早在途到货日
+  incomingEta: string | null       // 该 SKU 最早在途到货日（含加急），daysLate 由它算
+  /**
+   * 拆出常规补货与加急补货两个到货日，是因为它们在界面上的含义完全不同：
+   * routineEta 是「什么都不做会怎样」，expeditedEta 是「已经采取的动作把它提前到了什么时候」。
+   * 只留一个 incomingEta 时，Agent 下完加急采购单，横幅上的日期会从 09-16 无声跳到 09-07——
+   * 用户看到的是一个自己变了的数字，而不是自己刚刚批准的那个动作产生的结果。
+   */
+  routineEta: string | null
+  expeditedEta: string | null
   riskLevel: 'high' | 'medium' | 'none'
   daysLate: number
 }
@@ -25,9 +33,13 @@ export function simulateDeliveryRisk(db: DbSnapshot, orderIds: string[]): Delive
     .filter((o): o is NonNullable<typeof o> => !!o)
     .sort((a, b) => a.promisedDeliveryDate.localeCompare(b.promisedDeliveryDate))
 
+  const earliest = (a: string | null, b: string | null) =>
+    a && b ? (a < b ? a : b) : (a ?? b)
+
   return orders.map(o => {
     const shortages: Shortage[] = []
-    let incomingEta: string | null = null
+    let routineEta: string | null = null
+    let expeditedEta: string | null = null
     for (const line of o.items) {
       const p = db.products.find(x => x.id === line.skuId)!
       const avail = ledger.get(line.skuId) ?? 0
@@ -36,13 +48,16 @@ export function simulateDeliveryRisk(db: DbSnapshot, orderIds: string[]): Delive
       if (gap > 0) {
         shortages.push({ skuId: p.id, sku: p.sku, skuName: p.name,
                          required: line.qty, available: avail, gap })
-        const etas = db.purchaseOrders
+        const inFlight = db.purchaseOrders
           .filter(po => (po.status === '在途' || po.status === '已下单')
                      && po.items.some(l => l.skuId === line.skuId))
-          .map(po => po.eta).sort()
-        if (etas.length && (!incomingEta || etas[0] < incomingEta)) incomingEta = etas[0]
+        const min = (list: typeof inFlight) =>
+          list.map(po => po.eta).sort()[0] ?? null
+        routineEta = earliest(routineEta, min(inFlight.filter(po => !po.expedited)))
+        expeditedEta = earliest(expeditedEta, min(inFlight.filter(po => po.expedited)))
       }
     }
+    const incomingEta = earliest(routineEta, expeditedEta)
     let riskLevel: DeliveryRisk['riskLevel'] = 'none'
     let daysLate = 0
     if (shortages.length) {
@@ -55,7 +70,8 @@ export function simulateDeliveryRisk(db: DbSnapshot, orderIds: string[]): Delive
     const c = db.customers.find(x => x.id === o.customerId)
     return { orderId: o.id, orderNo: o.orderNo, customerName: c?.name ?? '—',
              promisedDeliveryDate: o.promisedDeliveryDate,
-             shortages, incomingEta, riskLevel, daysLate: Math.max(0, daysLate) }
+             shortages, incomingEta, routineEta, expeditedEta,
+             riskLevel, daysLate: Math.max(0, daysLate) }
   })
 }
 
@@ -87,10 +103,15 @@ export function buildRiskCards(db: DbSnapshot, user: User): RiskCard[] {
   if (risks.length) {
     const gap = risks.flatMap(r => r.shortages).reduce((s, x) => s + x.gap, 0)
     const sku = risks[0].shortages[0]
+    // 常规到货日打底、加急到货日括号补充：Agent 下过加急单之后，横幅上多出来的
+    // 那句「加急采购 X 到货中」就是它这次动作留下的痕迹，而不是一个自己变小了的数字。
+    const { routineEta, expeditedEta } = risks[0]
+    const eta = routineEta ? `当前最早可到货 ${routineEta}` : '当前无常规在途补货'
+    const expedited = expeditedEta ? `（加急采购 ${expeditedEta} 到货中）` : ''
     cards.push({
       id: 'RC-delivery', severity: 'high',
       title: `${risks.length} 张订单存在交期风险`,
-      detail: `${sku.sku} ${sku.skuName} 缺口 ${gap} 台，最早到货 ${risks[0].incomingEta ?? '无在途'}`,
+      detail: `${sku.sku} ${sku.skuName} 缺口 ${gap} 台，${eta}${expedited}`,
       question: '未来两周要交付的订单有风险吗？帮我排查并给出处理方案。',
     })
   }

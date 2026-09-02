@@ -1,9 +1,9 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
-import type { AgentEvent, Plan } from '../lib/types'
+import type { AgentEvent, Plan, Role } from '../lib/types'
 import { useStore } from '../lib/store'
 import { runAgent } from '../agent/loop'
-import { LlmRateLimited, resetUsage, sumUsage } from '../agent/llm'
-import { runReplay } from '../agent/replay'
+import { describeLlmError, resetUsage, sumUsage } from '../agent/llm'
+import { splitHistory, summarizeTurns } from '../agent/summarize'
 import { onAskAgent } from '../lib/bus'
 import type { StepState } from './PlanChecklist'
 import { readUiPrefs, writeUiPrefs } from '../lib/uiPrefs'
@@ -11,19 +11,43 @@ import {
   type Conversation, readConversations, writeConversations, newConversation, titleFor,
 } from '../lib/conversations'
 
-const PRESETS = [
-  '未来两周要交付的订单有风险吗？帮我排查并给出处理方案。',
-  '公司最大的客户是谁？',
-  '我这个月的商机漏斗情况怎么样？',
-]
 
-// Ruling T4-B：录播只录了两个场景，猜错场景会答非所问、但看起来像真的，比明说"不支持"更糟。
-// 命中不了任何场景就不猜，交给调用方走诚实降级提示。
-type Scene = 'delivery' | 'permission' | null
-function pickScene(q: string): Scene {
-  if (/风险|交期|延期|发货/.test(q)) return 'delivery'
-  if (/最大|排名|客户/.test(q)) return 'permission'
-  return null
+/**
+ * 每个角色的引导问题。点一下就发问，是新用户理解「这个系统能干什么」的第一入口。
+ *
+ * 为什么按角色分：旧版是全局 3 条，供应链主管点开面板会看到「我这个月的商机漏斗情况怎么样」——
+ * 他压根没有商机相关的权限，点下去只会得到一段「这个我做不了」的边界引导。
+ * 在第一印象的位置摆一个必然失败的入口，等于开场先自证做不到。
+ *
+ * 每条都在真实模型 + 真实工具上端到端跑通过（规划 → function calling → 工具返回 → 带单号的结论），
+ * 覆盖只读、写入 + 人工确认、跨模块聚合、以及 CEO 的越权代办留痕四类形态。
+ */
+export const PRESETS_BY_ROLE: Record<Role, string[]> = {
+  sales_rep: [
+    '我手上有哪些待发货订单有交付风险？',
+    '我这个月的商机漏斗情况怎么样？',
+    '帮我给华宁自动化建一个下周的回访任务',
+  ],
+  sales_director: [
+    '团队里逾期超过 30 天的应收有哪些？',
+    '本月团队的营收和商机漏斗怎么样？',
+    '未来两周要交付的订单有风险吗？',
+  ],
+  supply_chain: [
+    '未来两周要交付的订单有风险吗？帮我排查并给出处理方案。',
+    'SKU-203 库存够不够？在途采购什么时候到？',
+    '帮我把缺口最大的那个 SKU 的库存预留出来',
+  ],
+  ceo: [
+    '公司最大的客户是谁？',
+    '本月全公司的营收、商机漏斗和逾期应收情况',
+    '未来两周的交付风险，需要的话直接下加急采购单',
+  ],
+}
+
+/** 面板底部展示的引导问题。角色没配就返回空数组，不要退回全局默认——那正是旧实现的错。 */
+export function presetsFor(role: Role): string[] {
+  return PRESETS_BY_ROLE[role] ?? []
 }
 
 /**
@@ -46,13 +70,16 @@ export type Item =
   | { k: 'final'; text: string; refs: string[] }
   | { k: 'error'; text: string }
   | { k: 'divider'; text: string }
+  // 失败后的出路卡：一个能直接点的重试 + 一句「哪些数据不依赖模型」。
+  // 单独成一类而不是塞进 error，是因为 error 只负责陈述「出了什么事」，
+  // 这张卡负责「你现在能做什么」——两件事混在一张卡里，用户往往只读第一句就走了。
+  | { k: 'retry'; q: string; hint: string }
 
 export interface SidekickCtx {
   items: Item[]
   steps: Record<string, StepState>
   amended: Set<string>
   busy: boolean
-  replayMode: boolean
   input: string
   setInput: (v: string) => void
   ask: (q: string) => Promise<void>
@@ -81,7 +108,6 @@ export function useSidekick(): SidekickCtx {
   return c
 }
 
-export { PRESETS }
 
 function newConvId(): string {
   return `conv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -111,7 +137,6 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
   const [amended, setAmended] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
   const [busyConvId, setBusyConvId] = useState<string | null>(null)
-  const [replayMode, setReplayMode] = useState(false)
   const [input, setInput] = useState('')
   const pending = useRef<Map<string, (ok: boolean) => void>>(new Map())
   // busy 状态用于渲染禁用输入框；busyRef 供 ask() 内部做实时并发拦截，
@@ -204,14 +229,16 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
     busyRef.current = true
     setBusy(true); setBusyConvId(targetId); setInput('')
     updateItems(targetId, p => [...p, { k: 'user', text: q }], true)
-    // 真跑成功时不该再挂着上一次失败留下的「录播模式」徽章。
-    setReplayMode(false)
     resetUsage()
 
     // onEvent 拿不到问题文本，所以在这里接住本轮的 final 文本，回头连同 q 一起进历史。
     let finalText = ''
+    // runAgent 在 LLM 失败时会先 emit 一条已分类的 error 再抛。记下来，catch 里就不必重复陈述，
+    // 只补「出路」卡；万一是没经过 emit 的异常（工具层抛错），catch 才自己补一条 error。
+    let sawError = false
     const emit = (e: AgentEvent) => {
       if (e.type === 'final') finalText = e.text
+      if (e.type === 'error') sawError = true
       onEvent(targetId, e)
     }
     const confirmFn = (id: string) => requestConfirm(id)
@@ -226,33 +253,43 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
         mutate: applyMutation, emit, pushAudit,
         requestConfirm: (id) => confirmFn(id),
         history: targetConv.history,
+        summary: targetConv.summary,
       })
     } catch (e) {
-      const limited = e instanceof LlmRateLimited
-      setReplayMode(true)
-      const scene = pickScene(q)
-      // 真实卡片已经 emit 过一部分，录播从这里接管，必须有肉眼可见的分界。
-      updateItems(targetId, p => [...p, { k: 'divider', text: limited
-        ? '模型限流，以下为预置演示内容'
-        : '模型连接失败，以下为预置演示内容' }])
-      if (scene) {
-        await runReplay(scene, askUser, emit, (id) => confirmFn(id))
-      } else {
-        // 没有匹配场景时，用户拿到的是一次纯粹的失败。文案只说两件事：
-        // 出了什么事（用他能懂的话）、他现在能做什么。不报内部错误码、不提「录播场景」——
-        // 那是实现细节，说出来只会让人觉得能力是假的。
-        updateItems(targetId, p => [...p, { k: 'error', text: limited
-          ? '模型调用太密集被限流了，等几秒再问一次就行。这期间可以先在左侧看客户、订单、库存的实时数据。'
-          : '暂时连不上模型，请稍后重试。左侧的客户、商机、订单、库存、应收数据不依赖模型，现在就能查。' }])
+      // 这里曾经是「录播模式」：LLM 一失败就回放一段预置事件流，UI 上除了一个小角标之外
+      // 与真实执行完全一样。删掉它的理由不是它有 bug——
+      //   1. 它只覆盖两个场景，猜错场景会答非所问、却看起来像真的；
+      //   2. 一段看不出真假的事件流，只要被追问一次「这是真跑的吗」，整个 demo 的可信度就没了。
+      // 现在失败就是失败。但失败必须给出路：说清出了什么事（error 卡，已由 runAgent 发出）、
+      // 给一个能直接点的重试、并指明哪些数据本来就不依赖模型。
+      if (!sawError) {
+        updateItems(targetId, p => [...p, { k: 'error', text: describeLlmError(e).text }])
       }
+      updateItems(targetId, p => [...p, { k: 'retry', q,
+        hint: '左侧的客户、商机、订单、库存、应收数据不依赖模型，现在就能查。' }])
     } finally {
       // 只有当前角色仍然是发起这次提问的角色时，才把这一轮写进历史。见 shouldRecordTurn。
       if (shouldRecordTurn(askUser.id, useStore.getState().currentUser.id, finalText)) {
-        setConversations(cs => cs.map(c => c.id === targetId
-          ? { ...c, history: [...c.history, { q, a: finalText }].slice(-2) } : c))
+        // 保留最近 HISTORY_TURNS 轮原文，挤出去的轮次异步折叠进摘要。
+        // 先同步把 kept 落盘，再 fire-and-forget 发摘要请求：摘要要多花一次模型往返，
+        // 让用户为它多等一秒是不值当的，而且它失败也不该影响这一轮的结果已经记下来这件事。
+        const prevSummary = conversationsRef.current.find(c => c.id === targetId)?.summary
+        const { kept, dropped } = splitHistory([
+          ...(conversationsRef.current.find(c => c.id === targetId)?.history ?? []),
+          { q, a: finalText },
+        ])
+        setConversations(cs => cs.map(c => c.id === targetId ? { ...c, history: kept } : c))
+        if (dropped.length) {
+          void summarizeTurns(prevSummary, dropped).then(summary => {
+            if (summary === prevSummary) return
+            setConversations(cs => cs.map(c => c.id === targetId ? { ...c, summary } : c))
+          })
+        }
       }
       const u = sumUsage()
       if (u.total_tokens > 0) {
+        setConversations(cs => cs.map(c => c.id === targetId
+          ? { ...c, lastPromptTokens: u.prompt_tokens } : c))
         updateItems(targetId, p => [...p, { k: 'divider',
           text: `本次问询消耗 ${u.total_tokens} tokens（输入 ${u.prompt_tokens} / 输出 ${u.completion_tokens}）` }])
       }
@@ -351,7 +388,7 @@ export function SidekickProvider({ children }: { children: ReactNode }) {
   }
 
   const value: SidekickCtx = {
-    items, steps, amended, busy, replayMode, input, setInput, ask, decide,
+    items, steps, amended, busy, input, setInput, ask, decide,
     open, setOpen, wide, setWide,
     conversations, activeId, activeConversation, busyConvId,
     newChat, switchChat, deleteChat, archiveChat, unarchiveChat, resetConversations,

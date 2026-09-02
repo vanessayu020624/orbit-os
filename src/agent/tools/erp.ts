@@ -1,6 +1,7 @@
 import type { ToolDef, Product } from '../../lib/types'
 import { TODAY } from '../../lib/types'
-import { scopeOrders, scopePurchaseOrders, maskOrderForRole, scopeSummary, boundaryReason } from '../../lib/rbac'
+import { scopeOrders, scopePurchaseOrders, scopeSummary, boundaryReason } from '../../lib/rbac'
+import { presentOrder, presentPurchaseOrder, presentSupplier } from '../present'
 
 function findProduct(products: Product[], skuOrName: string): Product | undefined {
   return products.find(p => p.sku === skuOrName || p.name === skuOrName)
@@ -28,7 +29,7 @@ export const erpTools: ToolDef[] = [
       if (a.deliveryDateFrom) rows = rows.filter(o => o.promisedDeliveryDate >= a.deliveryDateFrom)
       if (a.deliveryDateTo) rows = rows.filter(o => o.promisedDeliveryDate <= a.deliveryDateTo)
       if (!rows.length) return { found: false, reason: boundaryReason(scope, 'orders') }
-      const orders = rows.slice(0, a.limit ?? 20).map(o => maskOrderForRole(o, ctx.role))
+      const orders = rows.slice(0, a.limit ?? 20).map(o => presentOrder(o, ctx.db, ctx.role))
       return { scope, count: rows.length, orders }
     },
   },
@@ -50,12 +51,7 @@ export const erpTools: ToolDef[] = [
           ? `（${scope.basis}内共 ${scope.visible} 条，另有 ${scope.hidden} 条超出你的查看范围）` : ''
         return { found: false, reason: `未找到订单「${a.orderNo}」，或当前角色无权查看${extra}` }
       }
-      const c = ctx.db.customers.find(x => x.id === o.customerId)
-      const items = o.items.map(l => {
-        const p = ctx.db.products.find(x => x.id === l.skuId)
-        return { ...l, sku: p?.sku, skuName: p?.name }
-      })
-      return { scope, ...maskOrderForRole(o, ctx.role), customerName: c?.name ?? '—', items }
+      return { scope, ...presentOrder(o, ctx.db, ctx.role) }
     },
   },
   {
@@ -111,10 +107,7 @@ export const erpTools: ToolDef[] = [
         rows = rows.filter(po => po.items.some(l => l.skuId === p?.id))
       }
       if (!rows.length) return { found: false, reason: '没有符合条件的采购单' }
-      const suppliers = ctx.db.suppliers
-      const orders = rows.slice(0, a.limit ?? 20).map(po => ({
-        ...po, supplierName: suppliers.find(s => s.id === po.supplierId)?.name ?? '—',
-      }))
+      const orders = rows.slice(0, a.limit ?? 20).map(po => presentPurchaseOrder(po, ctx.db))
       return { count: rows.length, purchaseOrders: orders }
     },
   },
@@ -133,10 +126,7 @@ export const erpTools: ToolDef[] = [
       if (!p) return { found: false, reason: `未找到 SKU「${a.sku}」` }
       const suppliers = ctx.db.suppliers
         .filter(s => s.skuIds.includes(p.id))
-        .map(s => ({
-          id: s.id, name: s.name, leadTimeDays: s.leadTimeDays, onTimeRate: s.onTimeRate,
-          priceFactor: s.priceFactor, estimatedUnitCost: Math.round(p.cost * s.priceFactor),
-        }))
+        .map(s => presentSupplier(s, Math.round(p.cost * s.priceFactor)))
         .sort((x, y) => x.leadTimeDays - y.leadTimeDays)
       if (!suppliers.length) return { found: false, reason: `没有供应商可供应「${p.sku}」` }
       return { sku: p.sku, skuName: p.name, suppliers }

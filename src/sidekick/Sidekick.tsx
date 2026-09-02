@@ -1,28 +1,27 @@
 import { useStore } from '../lib/store'
 import { ROLE_META } from '../lib/rbac'
-import { toolsFor } from '../agent/registry'
+import { ALL_TOOLS, toolsFor } from '../agent/registry'
 import { PlanChecklist } from './PlanChecklist'
 import { ToolCallCard } from './ToolCallCard'
 import { ConfirmCard } from './ConfirmCard'
 import { FinalAnswer } from './FinalAnswer'
-import { PRESETS, useSidekick } from './SidekickProvider'
+import { presetsFor, useSidekick } from './SidekickProvider'
 import { ConversationBar } from './ConversationBar'
+import { ContextPanel } from './ContextPanel'
 
 export function Sidekick() {
   // 不要解构 db——本组件不用它，vite react-ts 模板开了 noUnusedLocals，会直接构建失败
   const { currentUser } = useStore()
   const c = useSidekick()
   const toolCount = toolsFor(currentUser.role).length
+  const presets = presetsFor(currentUser.role)
 
   return (
     <div className="flex flex-col h-full">
       <div className="px-4 py-3 border-b">
-        <div className="flex items-center justify-between">
-          <div className="font-medium text-sm">星轨</div>
-          {c.replayMode && <span className="text-[10px] px-1.5 py-0.5 rounded bg-warn/20 text-warn">录播模式</span>}
-        </div>
+        <div className="font-medium text-sm">星轨</div>
         <div className="text-xs text-slate-400 mt-0.5">
-          {currentUser.name} · {ROLE_META[currentUser.role].label} · 可用工具 {toolCount} 个
+          {currentUser.name} · {ROLE_META[currentUser.role].label} · 可用工具 {toolCount} / 共 {ALL_TOOLS.length} 个
         </div>
       </div>
 
@@ -43,6 +42,14 @@ export function Sidekick() {
             case 'confirm': return <ConfirmCard key={i} {...it} onDecide={ok => c.decide(it.id, ok)} />
             case 'final': return <FinalAnswer key={i} text={it.text} refs={it.refs} />
             case 'error': return <div key={i} className="text-xs text-danger bg-danger/5 rounded p-2">{it.text}</div>
+            case 'retry': return (
+              <div key={i} className="text-xs bg-slate-50 border rounded p-2 space-y-1.5">
+                <div className="text-slate-500">{it.hint}</div>
+                <button onClick={() => c.ask(it.q)} disabled={c.busy}
+                  className="px-2 py-1 rounded border text-slate-600 hover:border-brand hover:text-brand
+                             disabled:opacity-40">重新问一次</button>
+              </div>
+            )
             case 'divider': return (
               <div key={i} className="flex items-center gap-2 py-1">
                 <div className="flex-1 h-px bg-slate-200" />
@@ -55,8 +62,9 @@ export function Sidekick() {
       </div>
 
       <div className="border-t p-3 space-y-2">
+        <ContextPanel />
         <div className="flex flex-wrap gap-1.5">
-          {PRESETS.map(p => (
+          {presets.map(p => (
             <button key={p} onClick={() => c.ask(p)} disabled={c.busy}
               className="text-[11px] px-2 py-1 rounded-full border text-slate-500
                          hover:border-brand hover:text-brand disabled:opacity-40">

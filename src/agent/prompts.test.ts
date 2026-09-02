@@ -28,11 +28,27 @@ describe('会话历史注入（Bug 2a）', () => {
     expect(executorPrompt(wangQiang, PLAN, [{ q: '甲', a: '乙' }])).toContain('最近的对话')
     expect(executorPrompt(wangQiang, PLAN)).not.toContain('最近的对话')
   })
-  it('单轮答案截断到 600 字，不会把整段长回答塞进上下文', () => {
+  it('单轮答案截断到 800 字，不会把整段长回答塞进上下文', () => {
+    // 600 → 800：保留轮数从 2 提到 6 之后，带单号清单的长回答（dir-1 那种十几条应收）
+    // 在 600 字处正好会被从中间切断，追问「第三条那个客户」时指代就断了。
     const long = '啊'.repeat(1000)
     const p = plannerPrompt(wangQiang, [{ q: '甲', a: long }])
-    expect(p).toContain('啊'.repeat(600))
-    expect(p).not.toContain('啊'.repeat(601))
+    expect(p).toContain('啊'.repeat(800))
+    expect(p).not.toContain('啊'.repeat(801))
+  })
+
+  it('summary 单独成段，且标注它是背景而非数据来源', () => {
+    const p = plannerPrompt(wangQiang, [{ q: '甲', a: '乙' }], '用户此前关注华宁自动化的交付风险。')
+    expect(p).toContain('更早的对话摘要')
+    expect(p).toContain('用户此前关注华宁自动化的交付风险。')
+    // 摘要是二手转述，从里面摘编号当数据来源正是「引用核不上」的来源之一。
+    expect(p).toContain('不要从这里摘编号当作数据来源')
+  })
+
+  it('只有 summary 没有 history 时也照样注入', () => {
+    const p = executorPrompt(wangQiang, PLAN, [], '早前聊过 SKU-203 的缺口。')
+    expect(p).toContain('早前聊过 SKU-203 的缺口。')
+    expect(p).not.toContain('最近的对话')
   })
 })
 

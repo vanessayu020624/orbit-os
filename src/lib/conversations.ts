@@ -11,8 +11,10 @@ export interface Conversation {
   userId: string                        // 创建者，会话列表按它过滤到当前角色
   createdAt: number                     // Date.now()
   items: Item[]
-  history: { q: string; a: string }[]   // 喂给模型的最近两轮
+  history: { q: string; a: string }[]   // 原样喂给模型的最近几轮，上限见 agent/summarize.ts 的 HISTORY_TURNS
+  summary?: string                      // 更早轮次折叠成的摘要，与 history 一起进 prompt
   archived?: boolean                    // 缺省 / undefined 一律视为未归档
+  lastPromptTokens?: number             // 上一次问询实际发出的输入 token，供「上下文」面板显示
 }
 
 const KEY = 'orbitos.sidekick.conversations'

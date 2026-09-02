@@ -2,6 +2,7 @@ import type { ToolDef } from '../../lib/types'
 import { TODAY } from '../../lib/types'
 import { scopeCustomers, scopeOpportunities, scopeOrders, scopeReceivables, scopeSummary, boundaryReason } from '../../lib/rbac'
 import { simulateDeliveryRisk } from '../../lib/risk'
+import { presentCustomer, presentReceivable, presentRisk } from '../present'
 import { daysFromToday } from '../../lib/format'
 
 export const analyticsTools: ToolDef[] = [
@@ -27,10 +28,8 @@ export const analyticsTools: ToolDef[] = [
         ? withDays.filter(x => x.overdueDays >= a.overdueDaysMin)
         : withDays
       if (!filtered.length) return { found: false, reason: boundaryReason(scope, 'receivables') }
-      const receivables = filtered.slice(0, a.limit ?? 20).map(({ r, overdueDays }) => ({
-        ...r, customerName: ctx.db.customers.find(c => c.id === r.customerId)?.name ?? '—',
-        overdueDays,
-      }))
+      const receivables = filtered.slice(0, a.limit ?? 20)
+        .map(({ r, overdueDays }) => presentReceivable(r, ctx.db, overdueDays))
       return { scope, count: filtered.length, receivables }
     },
   },
@@ -72,7 +71,8 @@ export const analyticsTools: ToolDef[] = [
           const scope = scopeSummary(ctx.db, ctx.user, 'customers')
           const rows = [...scopeCustomers(ctx.db, ctx.user)].sort((x, y) => y.annualRevenue - x.annualRevenue)
           if (!rows.length) return { found: false, reason: boundaryReason(scope, 'customers') }
-          return { scope, metric: 'top_customers', topCustomers: rows.slice(0, a.limit ?? 5) }
+          return { scope, metric: 'top_customers',
+                   topCustomers: rows.slice(0, a.limit ?? 5).map(c => presentCustomer(c, ctx.db, ctx.role)) }
         }
         case 'order_status': {
           const scope = scopeSummary(ctx.db, ctx.user, 'orders')
@@ -126,7 +126,7 @@ export const analyticsTools: ToolDef[] = [
       const risks = simulateDeliveryRisk(ctx.db, ids)
       if (!risks.length) return { scope, found: false, reason: '指定订单未找到' }
       return {
-        scope, count: risks.length, risks,
+        scope, count: risks.length, risks: risks.map(presentRisk),
         ...(deniedCount > 0 ? {
           deniedCount,
           deniedReason: `另有 ${deniedCount} 个订单不在当前角色权限范围内，已过滤`,

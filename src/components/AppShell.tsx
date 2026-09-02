@@ -45,7 +45,7 @@ export function AppShell({ children, sidekick }: { children: ReactNode; sidekick
           {NAV_GROUPS.map(g => (
             <div key={g.title ?? '__root'}>
               {g.title && (
-                <div className="px-3 pt-3 pb-1 text-[10px] font-medium text-slate-400 tracking-wide">
+                <div className="px-3 pt-3 pb-1 text-[10px] font-medium text-slate-400 tracking-wide cursor-default">
                   {g.title}
                 </div>
               )}

@@ -20,9 +20,12 @@ function accessorFor(col: Column): Accessor {
   return col.value ?? ((r: any) => r[col.key] ?? '')
 }
 
-export function DataTable({ columns, rows, empty = '暂无数据', searchKeys }:
-  { columns: Column[]; rows: any[]; empty?: string; searchKeys?: string[] }) {
-  const [query, setQuery] = useState('')
+export function DataTable({ columns, rows, empty = '暂无数据', searchKeys, initialQuery = '' }:
+  { columns: Column[]; rows: any[]; empty?: string; searchKeys?: string[]
+    /** 初始搜索词。溯源标签跳转过来时用它自动定位到那一条（见 components/RefChip.tsx）。
+     *  只作为初值：用户随后可以改或清空。调用方靠 key 触发重挂载来响应 ?focus 的变化。 */
+    initialQuery?: string }) {
+  const [query, setQuery] = useState(initialQuery)
   const [active, setActive] = useState<Record<string, string>>({})
   const [sortKey, setSortKey] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<SortDir>('asc')

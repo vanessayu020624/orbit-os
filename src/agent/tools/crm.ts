@@ -1,15 +1,6 @@
-import type { Role, ToolDef } from '../../lib/types'
+import type { ToolDef } from '../../lib/types'
 import { canSeeCustomerFinancials, scopeCustomers, scopeOpportunities, scopeSummary, boundaryReason } from '../../lib/rbac'
-
-/** 供应链主管不需要知道客户的钱：从返回对象里删掉这三个 key（不置 0，置 0 会被模型当成真实数值）。 */
-function stripFinancials<T extends object>(c: T, role: Role): T {
-  if (canSeeCustomerFinancials(role)) return c
-  const rest: any = { ...c }
-  delete rest.annualRevenue
-  delete rest.creditLimit
-  delete rest.creditUsed
-  return rest as T
-}
+import { presentCustomer, presentOpportunity } from '../present'
 
 export const crmTools: ToolDef[] = [
   {
@@ -34,7 +25,7 @@ export const crmTools: ToolDef[] = [
         rows = [...rows].sort((x, y) => y.annualRevenue - x.annualRevenue)
       }
       if (!rows.length) return { found: false, reason: boundaryReason(scope, 'customers') }
-      const customers = rows.slice(0, a.limit ?? 20).map(c => stripFinancials(c, ctx.role))
+      const customers = rows.slice(0, a.limit ?? 20).map(c => presentCustomer(c, ctx.db, ctx.role))
       return { scope, count: rows.length, customers }
     },
   },
@@ -59,11 +50,7 @@ export const crmTools: ToolDef[] = [
         return { found: false, reason: `未找到客户「${a.nameOrId}」，或当前角色无权查看${extra}` }
       }
       const orders = ctx.db.orders.filter(o => o.customerId === c.id)
-      const detail: Record<string, unknown> = { ...c, orderCount: orders.length }
-      if (canSeeCustomerFinancials(ctx.role)) {
-        detail.creditAvailable = c.creditLimit - c.creditUsed
-      }
-      return { scope, ...stripFinancials(detail, ctx.role) }
+      return { scope, ...presentCustomer(c, ctx.db, ctx.role), orderCount: orders.length }
     },
   },
   {
@@ -87,7 +74,7 @@ export const crmTools: ToolDef[] = [
       if (!rows.length) return { found: false, reason: boundaryReason(scope, 'opportunities') }
       const weighted = rows.reduce((s, o) => s + o.amount * o.probability, 0)
       return { scope, count: rows.length, weightedForecast: Math.round(weighted),
-               opportunities: rows.slice(0, a.limit ?? 20) }
+               opportunities: rows.slice(0, a.limit ?? 20).map(o => presentOpportunity(o, ctx.db)) }
     },
   },
   {
@@ -109,7 +96,8 @@ export const crmTools: ToolDef[] = [
       const u = ctx.db.users.find(x => x.name === a.assigneeName)
       if (!u) return { found: false, reason: `未找到用户「${a.assigneeName}」` }
       ctx.mutate({ kind: 'createTask', assigneeId: u.id, title: a.title, dueDate: a.dueDate })
-      return { ok: true, message: `已为 ${u.name} 创建任务「${a.title}」` }
+      return { ok: true, assigneeName: u.name, title: a.title, dueDate: a.dueDate,
+               message: `已为 ${u.name} 创建任务「${a.title}」，截止 ${a.dueDate}` }
     },
   },
 ]
